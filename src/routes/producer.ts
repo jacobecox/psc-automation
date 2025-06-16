@@ -33,14 +33,16 @@ router.post('/deploy/producer', async (req: Request, res: Response): Promise<voi
 
   // Optional: validate that required vars exist
   const requiredVars = [
-    "project_id",
     "region",
-    "subnet_name",
+    "zone",
     "vpc_name",
-    "psc_ip_address",
-    "reserved_ip_name",
-    "psc_endpoint_name",
-    "service_attachment_uri",
+    "subnet_name",
+    "instance_name",
+    "instance_group_name",
+    "backend_service_name",
+    "health_check_name",
+    "forwarding_rule_name",
+    "service_attachment_name"
   ];
   for (const v of requiredVars) {
     if (!vars[v]) {
