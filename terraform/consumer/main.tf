@@ -15,7 +15,6 @@ provider "google" {
 # Reserve internal IP address for PSC endpoint
 resource "google_compute_address" "psc_reserved_ip" {
   name         = var.reserved_ip_name
-  address      = var.psc_ip_address
   purpose      = "GCE_ENDPOINT"
   address_type = "INTERNAL"
   subnetwork   = var.subnet_name

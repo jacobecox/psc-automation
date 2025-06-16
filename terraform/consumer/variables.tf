@@ -18,14 +18,10 @@ variable "vpc_name" {
   type        = string
 }
 
-variable "psc_ip_address" {
-  description = "The IP address for the PSC endpoint (e.g., '10.20.0.50')"
-  type        = string
-}
-
 variable "reserved_ip_name" {
   description = "The name for the reserved IP address"
   type        = string
+  default     = "psc-reserved-ip"
 }
 
 variable "psc_endpoint_name" {

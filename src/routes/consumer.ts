@@ -12,8 +12,6 @@ router.use(express.json());
 
 function generateTerraformVars(vars: Record<string, any>, folder = 'consumer'): void {
   const dir = path.join(__dirname, '../../terraform', folder);
-  console.log('Terraform directory:', dir);
-  console.log('Directory exists:', fs.existsSync(dir));
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   const tfvarsPath = path.join(dir, 'terraform.tfvars.json');
   fs.writeFileSync(tfvarsPath, JSON.stringify(vars, null, 2), 'utf8');
@@ -22,44 +20,67 @@ function generateTerraformVars(vars: Record<string, any>, folder = 'consumer'): 
 
 function runTerraform(folder = 'consumer'): Promise<string> {
   const dir = path.join(__dirname, '../../terraform', folder);
-  console.log('Running terraform in directory:', dir);
-  console.log('Directory contents:', fs.readdirSync(dir));
   return new Promise((resolve, reject) => {
-    exec('terraform init -upgrade && terraform apply -auto-approve', { cwd: dir }, (err, stdout, stderr) => {
-      if (err) return reject(new Error(stderr || err.message));
+    console.log('Starting Terraform execution in directory:', dir);
+    const process = exec('terraform init && terraform apply -auto-approve', { cwd: dir }, (err, stdout, stderr) => {
+      if (err) {
+        console.error('Terraform execution error:', err);
+        console.error('Terraform stderr:', stderr);
+        return reject(new Error(stderr || err.message));
+      }
+      console.log('Terraform execution completed successfully');
       resolve(stdout);
+    });
+
+    // Add timeout handling
+    const timeout = setTimeout(() => {
+      process.kill();
+      reject(new Error('Terraform execution timed out after 15 minutes'));
+    }, 15 * 60 * 1000); // 15 minutes timeout
+
+    process.on('exit', () => {
+      clearTimeout(timeout);
     });
   });
 }
 
 router.post('/deploy/consumer', async (req: Request, res: Response): Promise<void> => {
   const vars = req.body;
+  console.log('Received deployment request with variables:', vars);
 
-  // Optional: validate that required vars exist
-  const requiredVars = [
-    "project_id",
-    "region",
-    "subnet_name",
-    "vpc_name",
-    "psc_ip_address",
-    "reserved_ip_name",
-    "psc_endpoint_name",
-    "service_attachment_uri",
-  ];
-  for (const v of requiredVars) {
-    if (!vars[v]) {
-      res.status(400).json({ error: `Missing required variable: ${v}` });
-      return;
-    }
+  // Only require service_attachment_uri
+  if (!vars.service_attachment_uri) {
+    console.error('Missing required variable: service_attachment_uri');
+    res.status(400).json({ error: 'Missing required variable: service_attachment_uri' });
+    return;
   }
 
+  // Set default values
+  const defaultVars = {
+    project_id: "test-project-2-462619",
+    region: "us-central1",
+    vpc_name: "consumer-vpc",
+    subnet_name: "consumer-subnet",
+    psc_endpoint_name: "psc-endpoint",
+    reserved_ip_name: "psc-reserved-ip"
+  };
+
+  // Merge default values with provided variables
+  const mergedVars = { ...defaultVars, ...vars };
+
   try {
-    generateTerraformVars(vars, 'consumer');
+    console.log('Generating Terraform variables file...');
+    generateTerraformVars(mergedVars, 'consumer');
+    console.log('Running Terraform...');
     const output = await runTerraform('consumer');
+    console.log('Terraform execution completed');
     res.status(200).json({ message: 'Terraform apply successful', output });
   } catch (error) {
     console.error('Terraform error:', error);
-    res.status(500).json({ error: error instanceof Error ? error.message : 'Unknown error occurred' });
+    res.status(500).json({ 
+      error: error instanceof Error ? error.message : 'Unknown error occurred',
+      details: error instanceof Error ? error.stack : undefined
+    });
   }
 });
 

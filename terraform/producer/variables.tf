@@ -19,12 +19,12 @@ variable "vpc_name" {
 }
 
 variable "subnet_name" {
-  description = "The name of the subnet"
+  description = "The name of the subnet for the instance group"
   type        = string
 }
 
 variable "instance_name" {
-  description = "The name of the instance"
+  description = "The name of the existing VM to add to the instance group"
   type        = string
 }
 
@@ -53,12 +53,8 @@ variable "service_attachment_name" {
   type        = string
 }
 
-variable "topic_name" {
-  description = "The name of the Pub/Sub topic"
-  type        = string
-}
-
-variable "subscription_name" {
-  description = "The name of the Pub/Sub subscription"
-  type        = string
+variable "port" {
+  description = "The port number for the service (80 for HTTP, 5432 for PostgreSQL)"
+  type        = number
+  default     = 80
 } 
