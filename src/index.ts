@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import fs from 'fs';
 import producerRoutes from './routes/producer.js';
 import consumerRoutes from './routes/consumer.js';
+import producerManagedRoutes from './routes/producerManaged.js';
 
 dotenv.config();
 
@@ -15,6 +16,7 @@ app.use(express.json());
 // Routes
 app.use('/producer', producerRoutes);
 app.use('/consumer', consumerRoutes);
+app.use('/producerManaged', producerManagedRoutes);
 
 app.get('/', (_req, res) => {
   try {
