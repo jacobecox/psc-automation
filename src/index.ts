@@ -1,11 +1,42 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import producerRoutes from './routes/producer.js';
 import consumerRoutes from './routes/consumer.js';
 import producerManagedRoutes from './routes/producerManaged.js';
 
-dotenv.config();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Try multiple paths for .env file
+const possibleEnvPaths = [
+  path.join(__dirname, '../.env'),
+  path.join(process.cwd(), '.env'),
+  '.env'
+];
+
+let envLoaded = false;
+for (const envPath of possibleEnvPaths) {
+  console.log('Trying to load .env from:', envPath);
+  const result = dotenv.config({ path: envPath });
+  if (!result.error) {
+    console.log('Environment variables loaded successfully from:', envPath);
+    envLoaded = true;
+    break;
+  } else {
+    console.log('Failed to load from:', envPath, result.error.message);
+  }
+}
+
+if (!envLoaded) {
+  console.warn('No .env file found, using system environment variables');
+}
+
+console.log('Final environment variables:');
+console.log('GOOGLE_APPLICATION_CREDENTIALS:', process.env.GOOGLE_APPLICATION_CREDENTIALS);
+console.log('PORT:', process.env.PORT);
 
 const app = express();
 const port = process.env.PORT || 3000;

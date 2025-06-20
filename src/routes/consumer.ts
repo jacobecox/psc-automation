@@ -1,48 +1,8 @@
 import express, { Request, Response, Router } from 'express';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { exec } from 'child_process';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { runTerraform, getTerraformOutput, TerraformVariables } from '../utils/terraformExecutor.js';
 
 const router: Router = express.Router();
 router.use(express.json());
-
-function generateTerraformVars(vars: Record<string, any>, folder = 'consumer'): void {
-  const dir = path.join(__dirname, '../../terraform', folder);
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  const tfvarsPath = path.join(dir, 'terraform.tfvars.json');
-  fs.writeFileSync(tfvarsPath, JSON.stringify(vars, null, 2), 'utf8');
-  console.log(`terraform.tfvars.json written to ${tfvarsPath}`);
-}
-
-function runTerraform(folder = 'consumer'): Promise<string> {
-  const dir = path.join(__dirname, '../../terraform', folder);
-  return new Promise((resolve, reject) => {
-    console.log('Starting Terraform execution in directory:', dir);
-    const process = exec('terraform init && terraform apply -auto-approve', { cwd: dir }, (err, stdout, stderr) => {
-      if (err) {
-        console.error('Terraform execution error:', err);
-        console.error('Terraform stderr:', stderr);
-        return reject(new Error(stderr || err.message));
-      }
-      console.log('Terraform execution completed successfully');
-      resolve(stdout);
-    });
-
-    // Add timeout handling
-    const timeout = setTimeout(() => {
-      process.kill();
-      reject(new Error('Terraform execution timed out after 15 minutes'));
-    }, 15 * 60 * 1000); // 15 minutes timeout
-
-    process.on('exit', () => {
-      clearTimeout(timeout);
-    });
-  });
-}
 
 router.post('/deploy/consumer', async (req: Request, res: Response): Promise<void> => {
   const vars = req.body;
@@ -66,17 +26,55 @@ router.post('/deploy/consumer', async (req: Request, res: Response): Promise<voi
   };
 
   // Merge default values with provided variables
-  const mergedVars = { ...defaultVars, ...vars };
+  const mergedVars: TerraformVariables = { ...defaultVars, ...vars };
 
   try {
-    console.log('Generating Terraform variables file...');
-    generateTerraformVars(mergedVars, 'consumer');
-    console.log('Running Terraform...');
-    const output = await runTerraform('consumer');
+    console.log('Running Terraform for consumer...');
+    const output = await runTerraform('consumer', mergedVars);
     console.log('Terraform execution completed');
     res.status(200).json({ message: 'Terraform apply successful', output });
   } catch (error) {
     console.error('Terraform error:', error);
+    res.status(500).json({ 
+      error: error instanceof Error ? error.message : 'Unknown error occurred',
+      details: error instanceof Error ? error.stack : undefined
+    });
+  }
+});
+
+// Add status endpoint for consistency
+router.get('/status/consumer', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { project_id } = req.query;
+
+    if (!project_id || typeof project_id !== 'string') {
+      res.status(400).json({ 
+        error: 'Invalid project_id query parameter. Must be a non-empty string.',
+        details: 'Please provide a valid GCP project ID'
+      });
+      return;
+    }
+
+    try {
+      const outputs = await getTerraformOutput('consumer');
+      
+      res.status(200).json({
+        message: 'Consumer infrastructure status retrieved successfully',
+        project_id: project_id,
+        terraform_output: outputs
+      });
+
+    } catch (terraformError) {
+      console.error('Failed to get Terraform outputs:', terraformError);
+      res.status(404).json({ 
+        error: 'Consumer infrastructure not found or not deployed',
+        project_id: project_id,
+        details: terraformError instanceof Error ? terraformError.message : 'Unknown error'
+      });
+    }
+
+  } catch (error) {
+    console.error('Error in consumer status route:', error);
     res.status(500).json({ 
       error: error instanceof Error ? error.message : 'Unknown error occurred',
       details: error instanceof Error ? error.stack : undefined
