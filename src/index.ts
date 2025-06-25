@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import producerRoutes from './routes/producer.js';
 import consumerRoutes from './routes/consumer.js';
 import producerManagedRoutes from './routes/producerManaged.js';
+import createSqlRoutes from './routes/createSql.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -45,9 +46,10 @@ const port = process.env.PORT || 3000;
 app.use(express.json());
 
 // Routes
-app.use('/producer', producerRoutes);
-app.use('/consumer', consumerRoutes);
-app.use('/producerManaged', producerManagedRoutes);
+app.use('/api/producer', producerRoutes);
+app.use('/api/consumer', consumerRoutes);
+app.use('/api/producer-managed', producerManagedRoutes);
+app.use('/api/create-sql', createSqlRoutes);
 
 app.get('/', (_req, res) => {
   try {
@@ -63,6 +65,64 @@ app.get('/', (_req, res) => {
   }
 });
 
+// Add a simple debug route
+app.get('/debug', (_req, res) => {
+  console.log('=== DEBUG ROUTE HIT ===');
+  
+  const debugResponse = {
+    message: 'Debug route working',
+    timestamp: new Date().toISOString(),
+    server: 'psc-automation',
+    version: '1.0.0'
+  };
+  
+  // Set comprehensive response headers
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.setHeader('Connection', 'close');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  
+  // Convert response to string to get exact length
+  const responseString = JSON.stringify(debugResponse);
+  res.setHeader('Content-Length', Buffer.byteLength(responseString, 'utf8'));
+  
+  // Send response and explicitly end connection
+  res.status(200).send(responseString);
+  
+  // Force end the response and close connection
+  res.end();
+  
+  // Destroy the socket to ensure connection closure
+  if (res.socket && !res.socket.destroyed) {
+    res.socket.destroy();
+  }
+  
+  console.log('Debug response sent and ended successfully');
+});
+
 app.listen(port, () => {
   console.log(`Server is running on http://localhost:${port}`);
+});
+
+// Global process cleanup handlers
+process.on('SIGINT', () => {
+  console.log('Received SIGINT, shutting down gracefully...');
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  console.log('Received SIGTERM, shutting down gracefully...');
+  process.exit(0);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  process.exit(1);
 });
