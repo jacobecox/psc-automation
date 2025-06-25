@@ -10,7 +10,6 @@ router.use(express.json());
 interface ProducerManagedRequest {
   project_id?: string;
   region?: string;
-  auto_create_sql?: boolean;
 }
 
 interface ProducerManagedResponse {
@@ -50,8 +49,7 @@ router.post('/deploy/managed', async (req: Request, res: Response): Promise<void
   try {
     const { 
       project_id = "test-project-2-462619", 
-      region = "us-central1",
-      auto_create_sql = true // Default to true for automatic SQL creation
+      region = "us-central1"
     } = req.body as ProducerManagedRequest;
 
     // Validate the project ID
@@ -75,7 +73,6 @@ router.post('/deploy/managed', async (req: Request, res: Response): Promise<void
     }
 
     console.log(`Starting managed producer deployment for project: ${project_id} in region: ${region}`);
-    console.log(`Auto-create SQL: ${auto_create_sql}`);
 
     // Set environment variables for Terraform
     process.env.TF_VAR_project_id = project_id;
@@ -107,78 +104,89 @@ router.post('/deploy/managed', async (req: Request, res: Response): Promise<void
         terraform_output: terraformResult
       };
 
-      // Automatically create SQL instance if requested
-      if (auto_create_sql) {
-        try {
-          console.log('Starting automatic SQL creation...');
-          
-          // Prepare SQL creation variables
-          const sqlVariables = {
-            project_id: project_id,
-            region: region,
-            instance_id: "producer-sql",
-            default_password: "postgres",
-            allowed_consumer_project_id: "consumer-test-project-463821"
-          };
+      // Automatically call the createSql route after infrastructure deployment
+      try {
+        console.log('Starting automatic SQL creation via createSql route...');
+        
+        // Prepare SQL creation variables
+        const sqlVariables = {
+          project_id: project_id,
+          region: region,
+          instance_id: "producer-sql",
+          default_password: "postgres",
+          allowed_consumer_project_id: "consumer-test-project-463821",
+          tier: "db-f1-micro",
+          database_version: "POSTGRES_17",
+          deletion_protection: false,
+          backup_enabled: true,
+          backup_start_time: "02:00",
+          maintenance_day: 7,
+          maintenance_hour: 2,
+          maintenance_update_track: "stable"
+        };
 
-          // Run SQL creation
-          const sqlResult = await runTerraform('create-sql', sqlVariables);
-          console.log('SQL creation completed successfully');
-          
-          // Get SQL outputs
-          const sqlOutputs = await getTerraformOutput('create-sql');
-          
-          // Poll for PSC completion
-          console.log('Starting PSC completion polling for automatic SQL creation...');
-          const pscCompleted = await pollForPscCompletion(
-            project_id,
-            sqlOutputs.instance_name || 'producer-sql',
-            30 // 30 minutes timeout
-          );
-          
-          // Add SQL results to response
-          response.sql_creation_result = {
-            success: true,
-            message: pscCompleted 
-              ? 'SQL instance created successfully with PSC enabled'
-              : 'SQL instance created successfully, but PSC enablement timed out',
-            instance_name: sqlOutputs.instance_name || 'producer-sql',
-            instance_connection_name: sqlOutputs.instance_connection_name || '',
-            private_ip_address: sqlOutputs.private_ip_address || '',
-            database_name: sqlOutputs.database_name || 'postgres',
-            user_name: sqlOutputs.user_name || 'postgres',
-            allowed_consumer_project_id: sqlOutputs.allowed_consumer_project_id || 'consumer-test-project-463821',
-            terraform_output: sqlOutputs,
-            psc_enabled: pscCompleted
-          };
-          
-          response.message = pscCompleted 
-            ? 'Managed Producer infrastructure and SQL instance deployed successfully with PSC enabled'
-            : 'Managed Producer infrastructure and SQL instance deployed successfully (PSC timed out)';
-          
-        } catch (sqlError) {
-          console.error('SQL creation failed:', sqlError);
-          
-          // Check if this is a successful PSC submission
-          const isPscSuccess = sqlError instanceof Error && 
-            sqlError.message.includes('PSC operation submitted successfully and is running in background');
-          
-          const isPscTimeout = sqlError instanceof Error && 
-            sqlError.message.includes('PSC operation is taking longer than expected but was submitted successfully');
-          
-          response.sql_creation_result = {
-            success: isPscSuccess || isPscTimeout,
-            message: isPscSuccess 
-              ? 'SQL instance created successfully, PSC operation submitted and running in background'
-              : isPscTimeout
-              ? 'SQL instance created successfully, PSC operation in progress'
-              : 'SQL creation failed',
-            error: isPscSuccess || isPscTimeout 
-              ? 'PSC operation is running in background and will complete automatically'
-              : sqlError instanceof Error ? sqlError.message : 'Unknown SQL creation error'
-          };
-          // Don't fail the entire request, just log the SQL error
-        }
+        // Run SQL creation using the same logic as createSql route
+        console.log('Running Terraform for SQL deployment...');
+        const sqlResult = await runTerraform('create-sql', sqlVariables);
+        console.log('SQL creation completed successfully');
+        
+        // Get SQL outputs
+        console.log('Retrieving Terraform outputs...');
+        const sqlOutputs = await getTerraformOutput('create-sql');
+        console.log('Terraform outputs retrieved:', sqlOutputs);
+        
+        // Poll for PSC completion
+        console.log('Starting PSC completion polling for automatic SQL creation...');
+        const pscCompleted = await pollForPscCompletion(
+          project_id,
+          sqlOutputs.instance_name || 'producer-sql',
+          30 // 30 minutes timeout
+        );
+        
+        // Add SQL results to response
+        response.sql_creation_result = {
+          success: true,
+          message: pscCompleted 
+            ? 'SQL instance created successfully with PSC enabled'
+            : 'SQL instance created successfully, but PSC enablement timed out',
+          instance_name: sqlOutputs.instance_name || 'producer-sql',
+          instance_connection_name: sqlOutputs.instance_connection_name || '',
+          private_ip_address: sqlOutputs.private_ip_address || '',
+          database_name: sqlOutputs.database_name || 'postgres',
+          user_name: sqlOutputs.user_name || 'postgres',
+          allowed_consumer_project_id: sqlOutputs.allowed_consumer_project_id || 'consumer-test-project-463821',
+          terraform_output: sqlOutputs,
+          psc_enabled: pscCompleted
+        };
+        
+        response.message = pscCompleted 
+          ? 'Managed Producer infrastructure and SQL instance deployed successfully with PSC enabled'
+          : 'Managed Producer infrastructure and SQL instance deployed successfully (PSC timed out)';
+        
+      } catch (sqlError) {
+        console.error('SQL creation failed:', sqlError);
+        
+        // Check if this is a PSC timeout error
+        const isPscTimeout = sqlError instanceof Error && 
+          sqlError.message.includes('PSC operation is taking longer than expected but was submitted successfully');
+        
+        // Check if this is a successful PSC submission
+        const isPscSuccess = sqlError instanceof Error && 
+          sqlError.message.includes('PSC operation submitted successfully and is running in background');
+        
+        const errorMessage = isPscTimeout 
+          ? 'SQL instance created successfully, but PSC enablement is still in progress. The operation will complete automatically in a few minutes.'
+          : isPscSuccess
+          ? 'SQL instance created successfully, and PSC enablement operation was submitted successfully. The PSC operation is running in the background and will complete automatically.'
+          : sqlError instanceof Error ? sqlError.message : 'Unknown Terraform error occurred';
+        
+        response.sql_creation_result = {
+          success: isPscTimeout || isPscSuccess,
+          message: isPscTimeout || isPscSuccess ? 'SQL instance created successfully (PSC in progress)' : 'SQL creation failed',
+          error: errorMessage
+        };
+        
+        // Don't fail the entire request, just log the SQL error
       }
 
       console.log('Sending success response:', JSON.stringify(response, null, 2));
@@ -188,11 +196,11 @@ router.post('/deploy/managed', async (req: Request, res: Response): Promise<void
       
       // Check if response has already been sent
       if (res.headersSent) {
-        console.log('🟡 RESPONSE CHECKPOINT 0: Response already sent, skipping');
+        console.log('🟢 RESPONSE CHECKPOINT 0: Response already sent, skipping');
         return;
       }
       
-      console.log('🟡 RESPONSE CHECKPOINT 1: Preparing to send response');
+      console.log('🟢 RESPONSE CHECKPOINT 1: Preparing to send response');
       
       // Set comprehensive response headers for better compatibility
       res.setHeader('Content-Type', 'application/json');
@@ -202,30 +210,30 @@ router.post('/deploy/managed', async (req: Request, res: Response): Promise<void
       res.setHeader('Connection', 'close');
       res.setHeader('X-Content-Type-Options', 'nosniff');
       
-      console.log('🟡 RESPONSE CHECKPOINT 2: Headers set');
+      console.log('🟢 RESPONSE CHECKPOINT 2: Headers set');
       
       // Convert response to string to get exact length
       const responseString = JSON.stringify(response);
       res.setHeader('Content-Length', Buffer.byteLength(responseString, 'utf8'));
       
-      console.log('🟡 RESPONSE CHECKPOINT 3: Response stringified, length:', Buffer.byteLength(responseString, 'utf8'));
+      console.log('🟢 RESPONSE CHECKPOINT 3: Response stringified, length:', Buffer.byteLength(responseString, 'utf8'));
       
       // Send response and explicitly end connection
       res.status(200).send(responseString);
       
-      console.log('🟡 RESPONSE CHECKPOINT 4: Response sent');
+      console.log('🟢 RESPONSE CHECKPOINT 4: Response sent');
       
       // Force end the response and close connection
       res.end();
       
-      console.log('🟡 RESPONSE CHECKPOINT 5: Response ended');
+      console.log('🟢 RESPONSE CHECKPOINT 5: Response ended');
       
       // Destroy the socket to ensure connection closure
       if (res.socket && !res.socket.destroyed) {
         res.socket.destroy();
-        console.log('🟡 RESPONSE CHECKPOINT 6: Socket destroyed');
+        console.log('🟢 RESPONSE CHECKPOINT 6: Socket destroyed');
       } else {
-        console.log('🟡 RESPONSE CHECKPOINT 6: Socket already destroyed or not available');
+        console.log('🟢 RESPONSE CHECKPOINT 6: Socket already destroyed or not available');
       }
       
       console.log('Response sent and ended successfully');
@@ -240,7 +248,7 @@ router.post('/deploy/managed', async (req: Request, res: Response): Promise<void
       
       // Check if response has already been sent
       if (res.headersSent) {
-        console.log('🟡 ERROR RESPONSE CHECKPOINT 0: Response already sent, skipping error response');
+        console.log('🟢 ERROR RESPONSE CHECKPOINT 0: Response already sent, skipping error response');
         return;
       }
       
@@ -289,7 +297,7 @@ router.post('/deploy/managed', async (req: Request, res: Response): Promise<void
     
     // Check if response has already been sent
     if (res.headersSent) {
-      console.log('🟡 ERROR RESPONSE CHECKPOINT 0: Response already sent, skipping error response');
+      console.log('🟢 ERROR RESPONSE CHECKPOINT 0: Response already sent, skipping error response');
       return;
     }
     

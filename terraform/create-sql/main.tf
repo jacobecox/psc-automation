@@ -27,12 +27,12 @@ data "google_compute_subnetwork" "producer_subnet" {
 # Create Cloud SQL instance
 resource "google_sql_database_instance" "producer_sql" {
   name             = var.instance_id
-  database_version = "POSTGRES_17"
+  database_version = var.database_version
   region           = var.region
   project          = var.project_id
 
   settings {
-    tier = "db-f1-micro"
+    tier = var.tier
     
     ip_configuration {
       ipv4_enabled    = false
@@ -40,18 +40,18 @@ resource "google_sql_database_instance" "producer_sql" {
     }
     
     backup_configuration {
-      enabled    = true
-      start_time = "02:00"
+      enabled    = var.backup_enabled
+      start_time = var.backup_start_time
     }
     
     maintenance_window {
-      day          = 7
-      hour         = 2
-      update_track = "stable"
+      day          = var.maintenance_day
+      hour         = var.maintenance_hour
+      update_track = var.maintenance_update_track
     }
   }
 
-  deletion_protection = false
+  deletion_protection = var.deletion_protection
 }
 
 # Enable Private Service Connect automatically when instance is created

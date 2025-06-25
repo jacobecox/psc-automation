@@ -22,6 +22,11 @@ The managed producer route automatically:
    - Creates Private Service Connection for VPC peering
    - Enables private access to Google services
 
+4. **Automatically Creates Cloud SQL Instance**:
+   - Creates a PostgreSQL instance with configurable settings
+   - Enables Private Service Connect for secure access
+   - Configurable machine type, database version, backup settings, and maintenance window
+
 ## API Endpoints
 
 ### Deploy Managed Producer Infrastructure
@@ -31,7 +36,7 @@ The managed producer route automatically:
 **Request Body:**
 ```json
 {
-  "project_id": "producer-project-463519",  // optional, defaults to "producer-project-463519"
+  "project_id": "producer-project-463519",  // optional, defaults to "test-project-2-462619"
   "region": "us-central1"  // optional, defaults to us-central1
 }
 ```
@@ -39,7 +44,7 @@ The managed producer route automatically:
 **Response:**
 ```json
 {
-  "message": "Managed Producer infrastructure deployed successfully",
+  "message": "Managed Producer infrastructure and SQL instance deployed successfully with PSC enabled",
   "project_id": "producer-project-463519",
   "region": "us-central1",
   "vpc_name": "producer-vpc",
@@ -48,9 +53,76 @@ The managed producer route automatically:
   "psc_ip_range_name": "psc-ip-range",
   "vpc_self_link": "https://www.googleapis.com/compute/v1/projects/...",
   "subnet_self_link": "https://www.googleapis.com/compute/v1/projects/...",
+  "sql_creation_result": {
+    "success": true,
+    "message": "SQL instance created successfully with PSC enabled",
+    "instance_name": "producer-sql",
+    "instance_connection_name": "producer-project-463519:us-central1:producer-sql",
+    "private_ip_address": "10.0.0.100",
+    "database_name": "postgres",
+    "user_name": "postgres",
+    "allowed_consumer_project_id": "consumer-test-project-463821",
+    "terraform_output": {
+      // Full Terraform output object
+    },
+    "psc_enabled": true
+  },
   "terraform_output": {
     // Full Terraform output object
   }
+}
+```
+
+### Create SQL Instance (Standalone)
+
+**POST** `/createSql/deploy/create-sql`
+
+**Request Body:**
+```json
+{
+  "project_id": "producer-project-463519",  // optional, defaults to "producer-test-project"
+  "region": "us-central1",  // optional, defaults to us-central1
+  "instance_id": "producer-sql",  // optional, defaults to "producer-sql"
+  "default_password": "postgres",  // optional, defaults to "postgres"
+  "allowed_consumer_project_id": "consumer-test-project-463821",  // optional, defaults to "consumer-test-project-463821"
+  "tier": "db-f1-micro",  // optional, defaults to "db-f1-micro"
+  "database_version": "POSTGRES_17",  // optional, defaults to "POSTGRES_17"
+  "deletion_protection": false,  // optional, defaults to false
+  "backup_enabled": true,  // optional, defaults to true
+  "backup_start_time": "02:00",  // optional, defaults to "02:00"
+  "maintenance_day": 7,  // optional, defaults to 7 (Saturday)
+  "maintenance_hour": 2,  // optional, defaults to 2 (2 AM)
+  "maintenance_update_track": "stable"  // optional, defaults to "stable"
+}
+```
+
+**SQL Configuration Parameters:**
+
+- **tier**: Machine type for the SQL instance (e.g., "db-f1-micro", "db-n1-standard-1", "db-n1-standard-2")
+- **database_version**: PostgreSQL version (e.g., "POSTGRES_17", "POSTGRES_16", "POSTGRES_15")
+- **deletion_protection**: Whether to enable deletion protection (true/false)
+- **backup_enabled**: Whether to enable automated backups (true/false)
+- **backup_start_time**: Time for daily backups in HH:MM format (24-hour)
+- **maintenance_day**: Day of week for maintenance (1=Sunday, 7=Saturday)
+- **maintenance_hour**: Hour of day for maintenance (0-23, 24-hour format)
+- **maintenance_update_track**: Update track for maintenance ("stable" or "preview")
+
+**Response:**
+```json
+{
+  "message": "SQL infrastructure deployed successfully with PSC enabled",
+  "project_id": "producer-project-463519",
+  "region": "us-central1",
+  "instance_id": "producer-sql",
+  "instance_connection_name": "producer-project-463519:us-central1:producer-sql",
+  "private_ip_address": "10.0.0.100",
+  "database_name": "postgres",
+  "user_name": "postgres",
+  "allowed_consumer_project_id": "consumer-test-project-463821",
+  "terraform_output": {
+    // Full Terraform output object
+  },
+  "psc_enabled": true
 }
 ```
 
@@ -69,6 +141,28 @@ The managed producer route automatically:
   "psc_ip_address": "10.0.0.100",
   "vpc_self_link": "https://www.googleapis.com/compute/v1/projects/...",
   "subnet_self_link": "https://www.googleapis.com/compute/v1/projects/...",
+  "terraform_output": {
+    // Full Terraform output object
+  }
+}
+```
+
+### Get SQL Instance Status
+
+**GET** `/createSql/status/create-sql?project_id=your-gcp-project-id`
+
+**Response:**
+```json
+{
+  "message": "SQL infrastructure status retrieved successfully",
+  "project_id": "your-gcp-project-id",
+  "region": "us-central1",
+  "instance_id": "producer-sql",
+  "instance_connection_name": "producer-project-463519:us-central1:producer-sql",
+  "private_ip_address": "10.0.0.100",
+  "database_name": "postgres",
+  "user_name": "postgres",
+  "allowed_consumer_project_id": "consumer-test-project-463821",
   "terraform_output": {
     // Full Terraform output object
   }
@@ -100,38 +194,81 @@ The Terraform configuration is located in `terraform/producer-managed/` and incl
    - `google_compute_global_address.psc_ip_range`
    - `google_service_networking_connection.psc_connection`
 
-## Usage Example
+4. **Cloud SQL Instance**:
+   - `google_sql_database_instance.producer_sql`
+   - `google_sql_user.default_user`
+   - `null_resource.enable_psc` (enables Private Service Connect)
 
+## Usage Examples
+
+### Basic Deployment (Uses Defaults)
 ```bash
-# Method 1: Deploy with NO project_id (uses default: producer-project-463519)
-curl -X POST http://localhost:3000/producerManaged/deploy/managed \
-  -H "Content-Type: application/json" \
-  -d '{
-    "region": "us-central1"
-  }'
-
-# Method 2: Deploy with explicit default project_id
+# Deploy with default settings
 curl -X POST http://localhost:3000/producerManaged/deploy/managed \
   -H "Content-Type: application/json" \
   -d '{
     "project_id": "producer-project-463519",
     "region": "us-central1"
   }'
+```
 
-# Method 3: Deploy with custom project ID
-curl -X POST http://localhost:3000/producerManaged/deploy/managed \
+### Custom SQL Configuration
+```bash
+# Deploy with custom SQL settings
+curl -X POST http://localhost:3000/createSql/deploy/create-sql \
   -H "Content-Type: application/json" \
   -d '{
-    "project_id": "your-custom-project-id",
-    "region": "us-central1"
+    "project_id": "producer-project-463519",
+    "region": "us-central1",
+    "tier": "db-n1-standard-1",
+    "database_version": "POSTGRES_16",
+    "deletion_protection": true,
+    "backup_enabled": true,
+    "backup_start_time": "03:00",
+    "maintenance_day": 1,
+    "maintenance_hour": 3,
+    "maintenance_update_track": "stable"
   }'
-
-# Check status with default project ID
-curl "http://localhost:3000/producerManaged/status/managed?project_id=producer-project-463519"
-
-# Check status with custom project ID
-curl "http://localhost:3000/producerManaged/status/managed?project_id=your-custom-project-id"
 ```
+
+### Production-Ready Configuration
+```bash
+# Production-ready SQL instance
+curl -X POST http://localhost:3000/createSql/deploy/create-sql \
+  -H "Content-Type: application/json" \
+  -d '{
+    "project_id": "producer-project-463519",
+    "region": "us-central1",
+    "tier": "db-n1-standard-2",
+    "database_version": "POSTGRES_17",
+    "deletion_protection": true,
+    "backup_enabled": true,
+    "backup_start_time": "02:00",
+    "maintenance_day": 7,
+    "maintenance_hour": 2,
+    "maintenance_update_track": "stable"
+  }'
+```
+
+## Available Machine Types (Tiers)
+
+- **db-f1-micro**: 1 vCPU, 0.6 GB RAM (free tier)
+- **db-g1-small**: 1 vCPU, 1.7 GB RAM
+- **db-n1-standard-1**: 1 vCPU, 3.75 GB RAM
+- **db-n1-standard-2**: 2 vCPU, 7.5 GB RAM
+- **db-n1-standard-4**: 4 vCPU, 15 GB RAM
+- **db-n1-standard-8**: 8 vCPU, 30 GB RAM
+- **db-n1-standard-16**: 16 vCPU, 60 GB RAM
+- **db-n1-standard-32**: 32 vCPU, 120 GB RAM
+
+## Available Database Versions
+
+- **POSTGRES_17**: PostgreSQL 17 (latest)
+- **POSTGRES_16**: PostgreSQL 16
+- **POSTGRES_15**: PostgreSQL 15
+- **POSTGRES_14**: PostgreSQL 14
+- **POSTGRES_13**: PostgreSQL 13
+- **POSTGRES_12**: PostgreSQL 12
 
 ## Project ID Behavior
 

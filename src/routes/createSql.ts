@@ -10,6 +10,14 @@ interface CreateSqlRequest {
   instance_id?: string;
   default_password?: string;
   allowed_consumer_project_id?: string;
+  tier?: string;
+  database_version?: string;
+  deletion_protection?: boolean;
+  backup_enabled?: boolean;
+  backup_start_time?: string;
+  maintenance_day?: number;
+  maintenance_hour?: number;
+  maintenance_update_track?: string;
 }
 
 interface CreateSqlResponse {
@@ -29,7 +37,7 @@ interface CreateSqlResponse {
 
 router.post('/deploy/create-sql', async (req: Request, res: Response): Promise<void> => {
   console.log('=== CREATE SQL ROUTE HIT ===');
-  console.log('🟡 CHECKPOINT 1: Route handler started');
+  console.log('🟢 CHECKPOINT 1: Route handler started');
   console.log('Request method:', req.method);
   console.log('Request URL:', req.url);
   console.log('Request headers:', req.headers);
@@ -48,16 +56,24 @@ router.post('/deploy/create-sql', async (req: Request, res: Response): Promise<v
   }, 35 * 60 * 1000); // 35 minutes timeout (30 min PSC polling + buffer)
 
   try {
-    console.log('🟡 CHECKPOINT 2: Extracting request parameters');
+    console.log('🟢 CHECKPOINT 2: Extracting request parameters');
     const { 
       project_id = "producer-test-project", 
       region = "us-central1",
       instance_id = "producer-sql",
       default_password = "postgres",
-      allowed_consumer_project_id = "consumer-test-project-463821"
+      allowed_consumer_project_id = "consumer-test-project-463821",
+      tier = "db-f1-micro",
+      database_version = "POSTGRES_17",
+      deletion_protection = false,
+      backup_enabled = true,
+      backup_start_time = "02:00",
+      maintenance_day = 7,
+      maintenance_hour = 2,
+      maintenance_update_track = "stable"
     } = req.body as CreateSqlRequest;
 
-    console.log('🟡 CHECKPOINT 3: Validating request parameters');
+    console.log('🟢 CHECKPOINT 3: Validating request parameters');
     // Validate the project ID
     if (!project_id || typeof project_id !== 'string') {
       console.log('🔴 CHECKPOINT ERROR: Invalid project_id');
@@ -102,37 +118,133 @@ router.post('/deploy/create-sql', async (req: Request, res: Response): Promise<v
       return;
     }
 
-    console.log('🟡 CHECKPOINT 4: Parameters validated successfully');
+    // Validate the tier
+    if (tier && typeof tier !== 'string') {
+      console.log('🔴 CHECKPOINT ERROR: Invalid tier');
+      clearTimeout(timeout);
+      res.status(400).json({ 
+        error: 'Invalid tier. Must be a string.',
+        details: 'Please provide a valid machine type (e.g., db-f1-micro, db-n1-standard-1)'
+      });
+      return;
+    }
+
+    // Validate the database version
+    if (database_version && typeof database_version !== 'string') {
+      console.log('🔴 CHECKPOINT ERROR: Invalid database_version');
+      clearTimeout(timeout);
+      res.status(400).json({ 
+        error: 'Invalid database_version. Must be a string.',
+        details: 'Please provide a valid database version (e.g., POSTGRES_17, POSTGRES_16)'
+      });
+      return;
+    }
+
+    // Validate the deletion protection
+    if (typeof deletion_protection !== 'boolean') {
+      console.log('🔴 CHECKPOINT ERROR: Invalid deletion_protection');
+      clearTimeout(timeout);
+      res.status(400).json({ 
+        error: 'Invalid deletion_protection. Must be a boolean.',
+        details: 'Please provide true or false for deletion protection'
+      });
+      return;
+    }
+
+    // Validate the backup enabled
+    if (typeof backup_enabled !== 'boolean') {
+      console.log('🔴 CHECKPOINT ERROR: Invalid backup_enabled');
+      clearTimeout(timeout);
+      res.status(400).json({ 
+        error: 'Invalid backup_enabled. Must be a boolean.',
+        details: 'Please provide true or false for backup enabled'
+      });
+      return;
+    }
+
+    // Validate the backup start time
+    if (backup_start_time && typeof backup_start_time !== 'string') {
+      console.log('🔴 CHECKPOINT ERROR: Invalid backup_start_time');
+      clearTimeout(timeout);
+      res.status(400).json({ 
+        error: 'Invalid backup_start_time. Must be a string in HH:MM format.',
+        details: 'Please provide a valid time in 24-hour format (e.g., 02:00)'
+      });
+      return;
+    }
+
+    // Validate the maintenance day
+    if (typeof maintenance_day !== 'number' || maintenance_day < 1 || maintenance_day > 7) {
+      console.log('🔴 CHECKPOINT ERROR: Invalid maintenance_day');
+      clearTimeout(timeout);
+      res.status(400).json({ 
+        error: 'Invalid maintenance_day. Must be a number between 1 and 7.',
+        details: 'Please provide a valid day (1=Sunday, 7=Saturday)'
+      });
+      return;
+    }
+
+    // Validate the maintenance hour
+    if (typeof maintenance_hour !== 'number' || maintenance_hour < 0 || maintenance_hour > 23) {
+      console.log('🔴 CHECKPOINT ERROR: Invalid maintenance_hour');
+      clearTimeout(timeout);
+      res.status(400).json({ 
+        error: 'Invalid maintenance_hour. Must be a number between 0 and 23.',
+        details: 'Please provide a valid hour in 24-hour format'
+      });
+      return;
+    }
+
+    // Validate the maintenance update track
+    if (maintenance_update_track && typeof maintenance_update_track !== 'string') {
+      console.log('🔴 CHECKPOINT ERROR: Invalid maintenance_update_track');
+      clearTimeout(timeout);
+      res.status(400).json({ 
+        error: 'Invalid maintenance_update_track. Must be a string.',
+        details: 'Please provide a valid update track (stable, preview)'
+      });
+      return;
+    }
+
+    console.log('🟢 CHECKPOINT 4: Parameters validated successfully');
     console.log(`Starting SQL deployment for project: ${project_id} in region: ${region}`);
     console.log(`Instance ID: ${instance_id}, Consumer Project: ${allowed_consumer_project_id}`);
 
-    console.log('🟡 CHECKPOINT 5: Preparing Terraform variables');
+    console.log('🟢 CHECKPOINT 5: Preparing Terraform variables');
     // Prepare Terraform variables
     const terraformVariables: TerraformVariables = {
       project_id: project_id,
       region: region,
       instance_id: instance_id,
       default_password: default_password,
-      allowed_consumer_project_id: allowed_consumer_project_id
+      allowed_consumer_project_id: allowed_consumer_project_id,
+      tier: tier,
+      database_version: database_version,
+      deletion_protection: deletion_protection,
+      backup_enabled: backup_enabled,
+      backup_start_time: backup_start_time,
+      maintenance_day: maintenance_day,
+      maintenance_hour: maintenance_hour,
+      maintenance_update_track: maintenance_update_track
     };
     console.log('Terraform variables prepared:', JSON.stringify(terraformVariables, null, 2));
 
     try {
-      console.log('🟡 CHECKPOINT 6: Starting Terraform execution');
+      console.log('🟢 CHECKPOINT 6: Starting Terraform execution');
       // Run Terraform to create the Cloud SQL instance
       console.log('Running Terraform for SQL deployment...');
       const terraformResult = await runTerraform('create-sql', terraformVariables);
       console.log('🟢 CHECKPOINT 7: Terraform execution completed successfully');
       console.log('Terraform result:', terraformResult);
 
-      console.log('🟡 CHECKPOINT 8: Retrieving Terraform outputs');
+      console.log('🟢 CHECKPOINT 8: Retrieving Terraform outputs');
       // Get Terraform outputs
       console.log('Retrieving Terraform outputs...');
       const outputs = await getTerraformOutput('create-sql');
       console.log('🟢 CHECKPOINT 9: Terraform outputs retrieved successfully');
       console.log('Terraform outputs retrieved:', outputs);
 
-      console.log('🟡 CHECKPOINT 10: Starting PSC completion polling');
+      console.log('🟢 CHECKPOINT 10: Starting PSC completion polling');
       
       // Poll for PSC completion
       const pscCompleted = await pollForPscCompletion(
@@ -147,7 +259,7 @@ router.post('/deploy/create-sql', async (req: Request, res: Response): Promise<v
         console.log('🔴 CHECKPOINT 11: PSC polling timed out');
       }
 
-      console.log('🟡 CHECKPOINT 12: Preparing response');
+      console.log('🟢 CHECKPOINT 12: Preparing response');
       // Prepare response
       const response: CreateSqlResponse = {
         message: pscCompleted 
@@ -165,7 +277,7 @@ router.post('/deploy/create-sql', async (req: Request, res: Response): Promise<v
         psc_enabled: pscCompleted
       };
 
-      console.log('🟡 CHECKPOINT 13: Sending success response');
+      console.log('🟢 CHECKPOINT 13: Sending success response');
       console.log('Sending success response:', JSON.stringify(response, null, 2));
       
       // Clear timeout since we're about to send response
