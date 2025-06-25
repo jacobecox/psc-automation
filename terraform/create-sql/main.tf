@@ -182,4 +182,9 @@ output "region" {
 output "allowed_consumer_project_id" {
   description = "The project ID allowed for private service connect"
   value       = var.allowed_consumer_project_id
+}
+
+output "service_attachment_uri" {
+  description = "The service attachment URI for Private Service Connect"
+  value       = "projects/${var.project_id}/regions/${var.region}/serviceAttachments/${google_sql_database_instance.producer_sql.name}-psc"
 } 

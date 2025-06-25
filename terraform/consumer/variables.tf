@@ -1,11 +1,12 @@
 variable "project_id" {
-  description = "The GCP project ID"
+  description = "The GCP project ID for the consumer"
   type        = string
 }
 
 variable "region" {
-  description = "The GCP region"
+  description = "The region where resources will be created"
   type        = string
+  default     = "us-central1"
 }
 
 variable "subnet_name" {

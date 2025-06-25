@@ -2,6 +2,53 @@
 
 This module provides a managed approach to setting up producer infrastructure for Private Service Connect (PSC) using Terraform.
 
+## Prerequisites
+
+Before using this automation, ensure that the service account `central-service-account@admin-project-463522.iam.gserviceaccount.com` has the necessary permissions on the target project:
+
+### Required Permissions
+
+The service account needs the following roles on the target project:
+- `roles/editor` - For general resource management
+- `roles/serviceusage.serviceUsageAdmin` - For API enablement
+- `roles/resourcemanager.projectIamAdmin` - For IAM management
+
+### Granting Permissions
+
+You can grant the required permissions using one of these methods:
+
+**Option 1: Use the provided script**
+```bash
+chmod +x grant-permissions.sh
+./grant-permissions.sh your-project-id
+```
+
+**Option 2: Manual gcloud command**
+```bash
+gcloud projects add-iam-policy-binding your-project-id \
+  --member="serviceAccount:central-service-account@admin-project-463522.iam.gserviceaccount.com" \
+  --role="roles/editor"
+```
+
+**Option 3: Grant all required roles**
+```bash
+gcloud projects add-iam-policy-binding your-project-id \
+  --member="serviceAccount:central-service-account@admin-project-463522.iam.gserviceaccount.com" \
+  --role="roles/editor"
+
+gcloud projects add-iam-policy-binding your-project-id \
+  --member="serviceAccount:central-service-account@admin-project-463522.iam.gserviceaccount.com" \
+  --role="roles/serviceusage.serviceUsageAdmin"
+
+gcloud projects add-iam-policy-binding your-project-id \
+  --member="serviceAccount:central-service-account@admin-project-463522.iam.gserviceaccount.com" \
+  --role="roles/resourcemanager.projectIamAdmin"
+```
+
+### Error Handling
+
+If you encounter permission errors during deployment, the system will provide clear guidance on how to resolve them. The error messages will include the exact commands needed to grant the necessary permissions.
+
 ## Features
 
 The managed producer route automatically:
@@ -36,7 +83,7 @@ The managed producer route automatically:
 **Request Body:**
 ```json
 {
-  "project_id": "producer-project-463519",  // optional, defaults to "test-project-2-462619"
+  "producer_project_id": "producer-project-463519",  // optional, defaults to "test-project-2-462619"
   "region": "us-central1"  // optional, defaults to us-central1
 }
 ```
@@ -62,6 +109,7 @@ The managed producer route automatically:
     "database_name": "postgres",
     "user_name": "postgres",
     "allowed_consumer_project_id": "consumer-test-project-463821",
+    "service_attachment_uri": "projects/producer-project-463519/regions/us-central1/serviceAttachments/producer-sql-psc",
     "terraform_output": {
       // Full Terraform output object
     },
@@ -80,7 +128,7 @@ The managed producer route automatically:
 **Request Body:**
 ```json
 {
-  "project_id": "producer-project-463519",  // optional, defaults to "producer-test-project"
+  "producer_project_id": "producer-project-463519",  // optional, defaults to "producer-test-project"
   "region": "us-central1",  // optional, defaults to us-central1
   "instance_id": "producer-sql",  // optional, defaults to "producer-sql"
   "default_password": "postgres",  // optional, defaults to "postgres"
@@ -119,6 +167,7 @@ The managed producer route automatically:
   "database_name": "postgres",
   "user_name": "postgres",
   "allowed_consumer_project_id": "consumer-test-project-463821",
+  "service_attachment_uri": "projects/producer-project-463519/regions/us-central1/serviceAttachments/producer-sql-psc",
   "terraform_output": {
     // Full Terraform output object
   },
@@ -128,7 +177,7 @@ The managed producer route automatically:
 
 ### Get Managed Producer Status
 
-**GET** `/producerManaged/status/managed?project_id=your-gcp-project-id`
+**GET** `/producerManaged/status/managed?producer_project_id=your-gcp-project-id`
 
 **Response:**
 ```json
@@ -149,7 +198,7 @@ The managed producer route automatically:
 
 ### Get SQL Instance Status
 
-**GET** `/createSql/status/create-sql?project_id=your-gcp-project-id`
+**GET** `/createSql/status/create-sql?producer_project_id=your-gcp-project-id`
 
 **Response:**
 ```json
@@ -163,6 +212,7 @@ The managed producer route automatically:
   "database_name": "postgres",
   "user_name": "postgres",
   "allowed_consumer_project_id": "consumer-test-project-463821",
+  "service_attachment_uri": "projects/producer-project-463519/regions/us-central1/serviceAttachments/producer-sql-psc",
   "terraform_output": {
     // Full Terraform output object
   }
@@ -207,7 +257,7 @@ The Terraform configuration is located in `terraform/producer-managed/` and incl
 curl -X POST http://localhost:3000/producerManaged/deploy/managed \
   -H "Content-Type: application/json" \
   -d '{
-    "project_id": "producer-project-463519",
+    "producer_project_id": "producer-project-463519",
     "region": "us-central1"
   }'
 ```
@@ -218,7 +268,7 @@ curl -X POST http://localhost:3000/producerManaged/deploy/managed \
 curl -X POST http://localhost:3000/createSql/deploy/create-sql \
   -H "Content-Type: application/json" \
   -d '{
-    "project_id": "producer-project-463519",
+    "producer_project_id": "producer-project-463519",
     "region": "us-central1",
     "tier": "db-n1-standard-1",
     "database_version": "POSTGRES_16",
@@ -237,7 +287,7 @@ curl -X POST http://localhost:3000/createSql/deploy/create-sql \
 curl -X POST http://localhost:3000/createSql/deploy/create-sql \
   -H "Content-Type: application/json" \
   -d '{
-    "project_id": "producer-project-463519",
+    "producer_project_id": "producer-project-463519",
     "region": "us-central1",
     "tier": "db-n1-standard-2",
     "database_version": "POSTGRES_17",
@@ -272,7 +322,7 @@ curl -X POST http://localhost:3000/createSql/deploy/create-sql \
 
 ## Project ID Behavior
 
-The `project_id` parameter is **optional** in the request body:
+The `producer_project_id` parameter is **optional** in the request body:
 
 - **If omitted**: Uses the default project ID `"producer-project-463519"`
 - **If provided**: Uses the specified project ID
@@ -280,30 +330,8 @@ The `project_id` parameter is **optional** in the request body:
 
 This allows for flexible usage while providing sensible defaults for common scenarios.
 
-## Prerequisites
-
-1. **Google Cloud SDK**: Must be installed and configured
-2. **Terraform**: Must be installed and available in PATH
-3. **Service Account**: Must have appropriate permissions for:
-   - Enabling APIs
-   - Creating VPC networks and subnets
-   - Creating firewall rules
-   - Reserving IP addresses
-
-## Error Handling
-
-The API provides detailed error messages for:
-- Invalid project ID or region
-- Terraform execution failures
-- Missing or malformed requests
-- Infrastructure deployment issues
-
 ## Testing
 
 Use the provided test script:
 
-```bash
-node test-managed-producer.js
 ```
-
-This will test both the deployment and status endpoints with a sample project ID. 

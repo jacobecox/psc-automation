@@ -5,7 +5,7 @@ const router: Router = express.Router();
 router.use(express.json());
 
 interface CreateSqlRequest {
-  project_id?: string;
+  producer_project_id?: string;
   region?: string;
   instance_id?: string;
   default_password?: string;
@@ -30,6 +30,7 @@ interface CreateSqlResponse {
   database_name: string;
   user_name: string;
   allowed_consumer_project_id: string;
+  service_attachment_uri: string;
   terraform_output?: any;
   error?: string;
   psc_enabled?: boolean;
@@ -58,7 +59,7 @@ router.post('/deploy/create-sql', async (req: Request, res: Response): Promise<v
   try {
     console.log('🟢 CHECKPOINT 2: Extracting request parameters');
     const { 
-      project_id = "producer-test-project", 
+      producer_project_id = "producer-test-project", 
       region = "us-central1",
       instance_id = "producer-sql",
       default_password = "postgres",
@@ -75,11 +76,11 @@ router.post('/deploy/create-sql', async (req: Request, res: Response): Promise<v
 
     console.log('🟢 CHECKPOINT 3: Validating request parameters');
     // Validate the project ID
-    if (!project_id || typeof project_id !== 'string') {
-      console.log('🔴 CHECKPOINT ERROR: Invalid project_id');
+    if (!producer_project_id || typeof producer_project_id !== 'string') {
+      console.log('🔴 CHECKPOINT ERROR: Invalid producer_project_id');
       clearTimeout(timeout);
       res.status(400).json({ 
-        error: 'Invalid project_id. Must be a non-empty string.',
+        error: 'Invalid producer_project_id. Must be a non-empty string.',
         details: 'Please provide a valid GCP project ID'
       });
       return;
@@ -207,13 +208,13 @@ router.post('/deploy/create-sql', async (req: Request, res: Response): Promise<v
     }
 
     console.log('🟢 CHECKPOINT 4: Parameters validated successfully');
-    console.log(`Starting SQL deployment for project: ${project_id} in region: ${region}`);
+    console.log(`Starting SQL deployment for project: ${producer_project_id} in region: ${region}`);
     console.log(`Instance ID: ${instance_id}, Consumer Project: ${allowed_consumer_project_id}`);
 
     console.log('🟢 CHECKPOINT 5: Preparing Terraform variables');
     // Prepare Terraform variables
     const terraformVariables: TerraformVariables = {
-      project_id: project_id,
+      project_id: producer_project_id,
       region: region,
       instance_id: instance_id,
       default_password: default_password,
@@ -248,7 +249,7 @@ router.post('/deploy/create-sql', async (req: Request, res: Response): Promise<v
       
       // Poll for PSC completion
       const pscCompleted = await pollForPscCompletion(
-        project_id, 
+        producer_project_id, 
         outputs.instance_name || instance_id,
         30 // 30 minutes timeout
       );
@@ -265,7 +266,7 @@ router.post('/deploy/create-sql', async (req: Request, res: Response): Promise<v
         message: pscCompleted 
           ? 'SQL infrastructure deployed successfully with PSC enabled'
           : 'SQL infrastructure deployed successfully, but PSC enablement timed out',
-        project_id: outputs.project_id || project_id,
+        project_id: outputs.project_id || producer_project_id,
         region: outputs.region || region,
         instance_id: outputs.instance_name || instance_id,
         instance_connection_name: outputs.instance_connection_name || '',
@@ -273,6 +274,7 @@ router.post('/deploy/create-sql', async (req: Request, res: Response): Promise<v
         database_name: outputs.database_name || 'postgres',
         user_name: outputs.user_name || 'postgres',
         allowed_consumer_project_id: outputs.allowed_consumer_project_id || allowed_consumer_project_id,
+        service_attachment_uri: outputs.service_attachment_uri || '',
         terraform_output: outputs,
         psc_enabled: pscCompleted
       };
@@ -324,7 +326,7 @@ router.post('/deploy/create-sql', async (req: Request, res: Response): Promise<v
       
       const errorResponse: CreateSqlResponse = {
         message: isPscTimeout || isPscSuccess ? 'SQL infrastructure deployed successfully (PSC in progress)' : 'SQL deployment failed',
-        project_id: project_id,
+        project_id: producer_project_id,
         region: region,
         instance_id: instance_id,
         instance_connection_name: '',
@@ -332,6 +334,7 @@ router.post('/deploy/create-sql', async (req: Request, res: Response): Promise<v
         database_name: 'postgres',
         user_name: 'postgres',
         allowed_consumer_project_id: allowed_consumer_project_id,
+        service_attachment_uri: '',
         error: errorMessage
       };
 
@@ -368,11 +371,11 @@ router.post('/deploy/create-sql', async (req: Request, res: Response): Promise<v
 // Add a route to get the current state of the SQL infrastructure
 router.get('/status/create-sql', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { project_id } = req.query;
+    const { producer_project_id } = req.query;
 
-    if (!project_id || typeof project_id !== 'string') {
+    if (!producer_project_id || typeof producer_project_id !== 'string') {
       res.status(400).json({ 
-        error: 'Invalid project_id query parameter. Must be a non-empty string.',
+        error: 'Invalid producer_project_id query parameter. Must be a non-empty string.',
         details: 'Please provide a valid GCP project ID'
       });
       return;
@@ -383,7 +386,7 @@ router.get('/status/create-sql', async (req: Request, res: Response): Promise<vo
       
       const response: CreateSqlResponse = {
         message: 'SQL infrastructure status retrieved successfully',
-        project_id: outputs.project_id || project_id as string,
+        project_id: outputs.project_id || producer_project_id as string,
         region: outputs.region || 'us-central1',
         instance_id: outputs.instance_name || 'producer-sql',
         instance_connection_name: outputs.instance_connection_name || '',
@@ -391,6 +394,7 @@ router.get('/status/create-sql', async (req: Request, res: Response): Promise<vo
         database_name: outputs.database_name || 'postgres',
         user_name: outputs.user_name || 'postgres',
         allowed_consumer_project_id: outputs.allowed_consumer_project_id || 'consumer-test-project-463821',
+        service_attachment_uri: outputs.service_attachment_uri || '',
         terraform_output: outputs
       };
 
@@ -400,7 +404,7 @@ router.get('/status/create-sql', async (req: Request, res: Response): Promise<vo
       console.error('Failed to get Terraform outputs:', terraformError);
       res.status(404).json({ 
         error: 'SQL infrastructure not found or not deployed',
-        project_id: project_id,
+        project_id: producer_project_id,
         details: terraformError instanceof Error ? terraformError.message : 'Unknown error'
       });
     }
