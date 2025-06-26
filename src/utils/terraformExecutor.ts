@@ -9,31 +9,27 @@ export interface TerraformVariables {
 }
 
 export interface TerraformOutput {
-  success: boolean;
+  producer_project_id?: string;
+  region?: string;
+  zone?: string;
   vpc_name?: string;
   subnet_name?: string;
-  psc_ip_range?: string;
-  psc_ip_range_name?: string;
-  vpc_self_link?: string;
-  subnet_self_link?: string;
-  project_id: string;
-  apis_enabled?: Record<string, any>;
-  // SQL-specific outputs
-  region?: string;
   instance_name?: string;
+  port?: number;
+  instance_group_name?: string;
+  backend_service_name?: string;
+  health_check_name?: string;
+  forwarding_rule_name?: string;
+  service_attachment_name?: string;
+  service_attachment_uri?: string;
+  allowed_consumer_project_id?: string;
+  consumer_project_id?: string;
   instance_connection_name?: string;
   private_ip_address?: string;
   database_name?: string;
   user_name?: string;
-  allowed_consumer_project_id?: string;
-  service_attachment_uri?: string;
-  // Consumer-specific outputs
-  vm_subnet_name?: string;
-  psc_subnet_name?: string;
-  vm_subnet_self_link?: string;
-  psc_subnet_self_link?: string;
-  psc_ip_address?: string;
-  psc_endpoint_name?: string;
+  vm_instance_name?: string;
+  vm_internal_ip?: string;
 }
 
 // Helper function to wait for a specified time
@@ -123,20 +119,44 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
       // Generate terraform.tfvars.json
       const tfvarsPath = path.join(terraformDir, 'terraform.tfvars.json');
       
+      // Set default values for environment variables
+      const defaultVars = {
+        producer_project_id: process.env.TF_VAR_producer_project_id || 'producer-test-project',
+        region: process.env.TF_VAR_region || 'us-central1',
+        zone: process.env.TF_VAR_zone || 'us-central1-a',
+        vpc_name: process.env.TF_VAR_vpc_name || 'producer-vpc',
+        subnet_name: process.env.TF_VAR_subnet_name || 'producer-subnet',
+        instance_name: process.env.TF_VAR_instance_name || 'producer-instance',
+        port: process.env.TF_VAR_port || 8080,
+        instance_group_name: process.env.TF_VAR_instance_group_name || 'producer-group',
+        backend_service_name: process.env.TF_VAR_backend_service_name || 'producer-backend',
+        health_check_name: process.env.TF_VAR_health_check_name || 'tcp-hc',
+        forwarding_rule_name: process.env.TF_VAR_forwarding_rule_name || 'producer-forwarding-rule',
+        service_attachment_name: process.env.TF_VAR_service_attachment_name || 'producer-attachment',
+        consumer_project_id: process.env.TF_VAR_consumer_project_id || 'consumer-test-project-463821',
+        allowed_consumer_project_id: process.env.TF_VAR_allowed_consumer_project_id || 'consumer-test-project-463821'
+      };
+      
       // Determine which variables to include based on the Terraform directory
       let tfvars: any = {
-        project_id: process.env.TF_VAR_project_id || 'producer-test-project',
-        region: process.env.TF_VAR_region || 'us-central1'
+        ...defaultVars
       };
       
       if (terraformDir.includes('consumer')) {
         // Consumer-specific variables
         tfvars = {
           ...tfvars,
-          subnet_name: 'psc-subnet',
-          vpc_name: 'consumer-vpc',
           psc_endpoint_name: 'psc-endpoint',
           service_attachment_uri: process.env.TF_VAR_service_attachment_uri || ''
+        };
+      } else if (terraformDir.includes('create-vm')) {
+        // Create-vm specific variables - only include what's declared in variables.tf
+        tfvars = {
+          consumer_project_id: tfvars.consumer_project_id,
+          region: tfvars.region,
+          instance_name: tfvars.instance_name,
+          machine_type: tfvars.machine_type,
+          os_image: tfvars.os_image
         };
       }
       
@@ -151,9 +171,18 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
         } else {
           const gcloudProject = stdout.trim();
           console.log(`gcloud default project: ${gcloudProject}`);
-          console.log(`Target project: ${tfvars.project_id}`);
           
-          if (gcloudProject !== tfvars.project_id) {
+          // Determine the target project based on the Terraform directory
+          let targetProject;
+          if (terraformDir.includes('create-vm') || terraformDir.includes('consumer')) {
+            targetProject = tfvars.consumer_project_id;
+          } else {
+            targetProject = tfvars.producer_project_id;
+          }
+          
+          console.log(`Target project: ${targetProject}`);
+          
+          if (gcloudProject !== targetProject) {
             console.log('WARNING: gcloud default project differs from target project!');
             console.log('This might cause API enablement issues.');
           }
@@ -161,16 +190,23 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
       });
       
       // Switch gcloud project to match target project
-      console.log(`Switching gcloud project to: ${tfvars.project_id}`);
+      let targetProject;
+      if (terraformDir.includes('create-vm') || terraformDir.includes('consumer')) {
+        targetProject = tfvars.consumer_project_id;
+      } else {
+        targetProject = tfvars.producer_project_id;
+      }
+      
+      console.log(`Switching gcloud project to: ${targetProject}`);
       
       // Make gcloud project switching synchronous
       await new Promise<void>((resolve, reject) => {
-        exec(`gcloud config set project ${tfvars.project_id}`, (error, stdout, stderr) => {
+        exec(`gcloud config set project ${targetProject}`, (error, stdout, stderr) => {
           if (error) {
             console.log('Failed to switch gcloud project:', error.message);
             reject(error);
           } else {
-            console.log(`✅ gcloud project switched to: ${tfvars.project_id}`);
+            console.log(`✅ gcloud project switched to: ${targetProject}`);
             resolve();
           }
         });
@@ -184,7 +220,7 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
           } else {
             const currentProject = stdout.trim();
             console.log(`Verified gcloud project is now: ${currentProject}`);
-            if (currentProject !== tfvars.project_id) {
+            if (currentProject !== targetProject) {
               console.log('⚠️ WARNING: gcloud project verification failed!');
             }
           }
@@ -192,290 +228,454 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
         });
       });
       
-      // Phase 1: Enable APIs only
-      console.log('Phase 1: Enabling required APIs...');
-      
-      // Determine which APIs to target based on the Terraform directory
-      let apiTargets = '';
-      if (terraformDir.includes('consumer')) {
-        // Consumer only needs cloud_resource_manager and compute_engine
-        apiTargets = '-target=google_project_service.cloud_resource_manager -target=google_project_service.compute_engine';
-      } else if (terraformDir.includes('producer-managed')) {
-        // Producer-managed needs all APIs
-        apiTargets = '-target=google_project_service.cloud_resource_manager -target=google_project_service.sql_admin -target=google_project_service.compute_engine -target=google_project_service.service_networking';
+      // Phase 1: Enable APIs only (skip for create-vm)
+      if (terraformDir.includes('create-vm')) {
+        console.log('Skipping API enablement for create-vm module (APIs already enabled by consumer route)');
+        console.log('Phase 2: Creating VM infrastructure...');
       } else {
-        // Default fallback - try to target all common APIs
-        apiTargets = '-target=google_project_service.cloud_resource_manager -target=google_project_service.compute_engine';
+        console.log('Phase 1: Enabling required APIs...');
+        
+        // Determine which APIs to target based on the Terraform directory
+        let apiTargets = '';
+        if (terraformDir.includes('consumer')) {
+          // Consumer only needs cloud_resource_manager and compute_engine
+          apiTargets = '-target=google_project_service.cloud_resource_manager -target=google_project_service.compute_engine';
+        } else if (terraformDir.includes('producer-managed')) {
+          // Producer-managed needs all APIs
+          apiTargets = '-target=google_project_service.cloud_resource_manager -target=google_project_service.sql_admin -target=google_project_service.compute_engine -target=google_project_service.service_networking';
+        } else {
+          // Default fallback - try to target all common APIs
+          apiTargets = '-target=google_project_service.cloud_resource_manager -target=google_project_service.compute_engine';
+        }
+        
+        const phase1Command = apiTargets 
+          ? `terraform init && terraform apply -auto-approve ${apiTargets}`
+          : 'terraform init && terraform apply -auto-approve';
+        
+        exec(phase1Command, { 
+          cwd: terraformDir,
+          env: { 
+            ...process.env, 
+            ...(terraformDir.includes('consumer') 
+              ? {
+                  TF_VAR_project_id: tfvars.consumer_project_id,
+                  TF_VAR_region: tfvars.region
+                }
+              : {
+                  TF_VAR_producer_project_id: tfvars.producer_project_id,
+                  TF_VAR_region: tfvars.region
+                }
+            )
+          }
+        }, async (error, stdout, stderr) => {
+          console.log('=== TERRAFORM PHASE 1 EXECUTION ===');
+          console.log('Command executed:', phase1Command);
+          console.log('Working directory:', terraformDir);
+          console.log('Environment variables:', terraformDir.includes('consumer')
+            ? {
+                TF_VAR_project_id: tfvars.consumer_project_id,
+                TF_VAR_region: tfvars.region
+              }
+            : {
+                TF_VAR_producer_project_id: tfvars.producer_project_id,
+                TF_VAR_region: tfvars.region
+              }
+          );
+          console.log('stdout:', stdout);
+          console.log('stderr:', stderr);
+          
+          if (error) {
+            console.log(`Terraform execution error (attempt ${attempt}):`, error.message);
+            console.log('Terraform stderr:', stderr);
+            
+            // Check if this is a permission/authentication error
+            const isPermissionError = stderr.includes('Permission denied') || 
+                                     stderr.includes('AUTH_PERMISSION_DENIED') ||
+                                     stderr.includes('403') ||
+                                     stderr.includes('forbidden') ||
+                                     stderr.includes('not authorized') ||
+                                     stderr.includes('insufficient permissions');
+            
+            if (isPermissionError) {
+              console.log('🔴 PERMISSION ERROR DETECTED');
+              console.log('The service account does not have sufficient permissions to enable APIs or manage resources in this project.');
+              console.log('');
+              console.log('To resolve this issue, please run the following command to grant the necessary permissions:');
+              console.log('');
+              const projectId = terraformDir.includes('consumer') ? tfvars.consumer_project_id : tfvars.producer_project_id;
+              console.log(`gcloud projects add-iam-policy-binding ${projectId} \\`);
+              console.log('  --member="serviceAccount:central-service-account@admin-project-463522.iam.gserviceaccount.com" \\');
+              console.log('  --role="roles/editor"');
+              console.log('');
+              console.log('Or run the provided script:');
+              console.log(`./grant-permissions.sh ${projectId}`);
+              console.log('');
+              console.log('After granting permissions, try the deployment again.');
+              console.log('');
+              
+              rejectExec(new Error(`Permission denied: Service account lacks sufficient permissions to manage project ${projectId}. Please grant the service account 'roles/editor' permission and try again.`));
+              return;
+            }
+            
+            // Check if this is an API enablement error
+            const isApiError = stderr.includes('SERVICE_DISABLED') || 
+                             stderr.includes('API has not been used') || 
+                             stderr.includes('not been used in project') ||
+                             stderr.includes('Compute Engine API has not been used');
+            
+            if (isApiError && attempt < 3) {
+              const waitTime = attempt * 300; // 300s, 600s, 900s (5min, 10min, 15min)
+              console.log(`API enablement error detected. Retrying in ${waitTime} seconds... (attempt ${attempt}/3)`);
+              
+              // For the first attempt, try to manually enable the Compute Engine API
+              if (attempt === 1) {
+                console.log('Attempting to manually enable Compute Engine API...');
+                try {
+                  const projectId = terraformDir.includes('consumer') ? tfvars.consumer_project_id : tfvars.producer_project_id;
+                  const enableCommand = `gcloud services enable compute.googleapis.com --project=${projectId}`;
+                  exec(enableCommand, (error, stdout, stderr) => {
+                    if (error) {
+                      console.log('Manual API enablement failed, will retry with delay:', error.message);
+                    } else {
+                      console.log('Manual API enablement successful:', stdout);
+                    }
+                  });
+                } catch (manualError) {
+                  console.log('Manual API enablement error:', manualError);
+                }
+              }
+              
+              setTimeout(async () => {
+                try {
+                  const result = await executeTerraform(terraformDir, attempt + 1);
+                  resolveExec(result);
+                } catch (retryError) {
+                  rejectExec(retryError);
+                }
+              }, waitTime * 1000);
+              return;
+            }
+            
+            rejectExec(new Error(`Terraform execution failed: ${error.message}`));
+            return;
+          }
+          
+          console.log('Phase 1 completed successfully. Waiting 120 seconds for API propagation...');
+          
+          // Wait for API propagation
+          setTimeout(async () => {
+            try {
+              // Phase 2: Create infrastructure
+              console.log('Phase 2: Creating infrastructure...');
+              const phase2Command = 'terraform apply -auto-approve';
+              
+              exec(phase2Command, { 
+                cwd: terraformDir,
+                env: { 
+                  ...process.env, 
+                  ...(terraformDir.includes('consumer')
+                    ? {
+                        TF_VAR_project_id: tfvars.consumer_project_id,
+                        TF_VAR_region: tfvars.region
+                      }
+                    : {
+                        TF_VAR_producer_project_id: tfvars.producer_project_id,
+                        TF_VAR_region: tfvars.region
+                      }
+                  )
+                }
+              }, (phase2Error, phase2Stdout, phase2Stderr) => {
+                if (phase2Error) {
+                  console.log('Phase 2 error:', phase2Error.message);
+                  console.log('Phase 2 stderr:', phase2Stderr);
+                  
+                  // Check if this is a permission/authentication error in Phase 2
+                  const isPhase2PermissionError = phase2Stderr.includes('Permission denied') || 
+                                                 phase2Stderr.includes('AUTH_PERMISSION_DENIED') ||
+                                                 phase2Stderr.includes('403') ||
+                                                 phase2Stderr.includes('forbidden') ||
+                                                 phase2Stderr.includes('not authorized') ||
+                                                 phase2Stderr.includes('insufficient permissions');
+                  
+                  if (isPhase2PermissionError) {
+                    console.log('🔴 PERMISSION ERROR DETECTED IN PHASE 2');
+                    console.log('The service account does not have sufficient permissions to create infrastructure in this project.');
+                    console.log('');
+                    console.log('To resolve this issue, please run the following command to grant the necessary permissions:');
+                    console.log('');
+                    const projectId = terraformDir.includes('consumer') ? tfvars.consumer_project_id : tfvars.producer_project_id;
+                    console.log(`gcloud projects add-iam-policy-binding ${projectId} \\`);
+                    console.log('  --member="serviceAccount:central-service-account@admin-project-463522.iam.gserviceaccount.com" \\');
+                    console.log('  --role="roles/editor"');
+                    console.log('');
+                    console.log('Or run the provided script:');
+                    console.log(`./grant-permissions.sh ${projectId}`);
+                    console.log('');
+                    console.log('After granting permissions, try the deployment again.');
+                    console.log('');
+                    
+                    rejectExec(new Error(`Permission denied in infrastructure creation: Service account lacks sufficient permissions to manage project ${projectId}. Please grant the service account 'roles/editor' permission and try again.`));
+                    return;
+                  }
+                  
+                  // Check if this is a Service Networking API propagation error
+                  const isServiceNetworkingError = phase2Stderr.includes('Service Networking API has not been used') ||
+                                                 phase2Stderr.includes('servicenetworking.googleapis.com') ||
+                                                 phase2Stderr.includes('wait a few minutes for the action to propagate');
+                  
+                  if (isServiceNetworkingError && attempt < 3) {
+                    const waitTime = 180; // 3 minutes for Service Networking API propagation
+                    console.log(`Service Networking API propagation error detected. Retrying in ${waitTime} seconds... (attempt ${attempt}/3)`);
+                    
+                    // Extract the actual project ID from the error message
+                    const projectMatch = phase2Stderr.match(/project (\d+)/);
+                    const projectId = terraformDir.includes('consumer') ? tfvars.consumer_project_id : tfvars.producer_project_id;
+                    const actualProjectId = projectMatch ? projectMatch[1] : projectId;
+                    console.log(`Detected actual project ID from error: ${actualProjectId}`);
+                    
+                    // Try to manually enable Service Networking API in the correct project
+                    console.log(`Attempting to manually enable Service Networking API in project: ${actualProjectId}...`);
+                    try {
+                      const enableCommand = `gcloud services enable servicenetworking.googleapis.com --project=${actualProjectId}`;
+                      exec(enableCommand, (error, stdout, stderr) => {
+                        if (error) {
+                          console.log('Manual Service Networking API enablement failed:', error.message);
+                        } else {
+                          console.log('Manual Service Networking API enablement successful:', stdout);
+                        }
+                      });
+                    } catch (manualError) {
+                      console.log('Manual Service Networking API enablement error:', manualError);
+                    }
+                    
+                    // Also try to enable in the target project if different
+                    if (actualProjectId !== projectId) {
+                      console.log(`Also enabling Service Networking API in target project: ${projectId}...`);
+                      try {
+                        const enableTargetCommand = `gcloud services enable servicenetworking.googleapis.com --project=${projectId}`;
+                        exec(enableTargetCommand, (error, stdout, stderr) => {
+                          if (error) {
+                            console.log('Manual target Service Networking API enablement failed:', error.message);
+                          } else {
+                            console.log('Manual target Service Networking API enablement successful:', stdout);
+                          }
+                        });
+                      } catch (manualError) {
+                        console.log('Manual target Service Networking API enablement error:', manualError);
+                      }
+                    }
+                    
+                    setTimeout(async () => {
+                      try {
+                        const result = await executeTerraform(terraformDir, attempt + 1);
+                        resolveExec(result);
+                      } catch (retryError) {
+                        rejectExec(retryError);
+                      }
+                    }, waitTime * 1000);
+                    return;
+                  }
+                  
+                  rejectExec(new Error(`Phase 2 failed: ${phase2Error.message}`));
+                  return;
+                }
+                
+                console.log('Phase 2 completed successfully');
+                
+                // Get Terraform outputs
+                try {
+                  console.log('Getting Terraform outputs...');
+                  exec('terraform output -json', { cwd: terraformDir }, (outputError, outputStdout, outputStderr) => {
+                    if (outputError) {
+                      console.log('Output parsing error:', outputError.message);
+                      console.log('Output stderr:', outputStderr);
+                      
+                      // If output parsing fails but Phase 2 succeeded, create a basic result
+                      console.log('Creating fallback result since infrastructure was created successfully');
+                      const projectId = terraformDir.includes('consumer') ? tfvars.consumer_project_id : tfvars.producer_project_id;
+                      const fallbackResult: TerraformOutput = {
+                        ...(terraformDir.includes('consumer') 
+                          ? { consumer_project_id: projectId }
+                          : { producer_project_id: projectId }
+                        ),
+                        vpc_name: terraformDir.includes('consumer') ? 'consumer-vpc' : 'producer-vpc',
+                        subnet_name: terraformDir.includes('consumer') ? 'vm-subnet' : 'producer-subnet',
+                        region: tfvars.region
+                      };
+                      
+                      console.log('Resolving with fallback result:', JSON.stringify(fallbackResult, null, 2));
+                      resolveExec(fallbackResult);
+                      return;
+                    }
+                    
+                    try {
+                      const outputs = JSON.parse(outputStdout);
+                      console.log('Terraform outputs:', outputs);
+                      
+                      const projectId = terraformDir.includes('consumer') ? tfvars.consumer_project_id : tfvars.producer_project_id;
+                      const result: TerraformOutput = {
+                        ...(terraformDir.includes('consumer') 
+                          ? { consumer_project_id: outputs.consumer_project_id?.value || projectId }
+                          : { producer_project_id: outputs.producer_project_id?.value || projectId }
+                        ),
+                        vpc_name: outputs.vpc_name?.value || (terraformDir.includes('consumer') ? 'consumer-vpc' : 'producer-vpc'),
+                        subnet_name: outputs.subnet_name?.value || (terraformDir.includes('consumer') ? 'vm-subnet' : 'producer-subnet'),
+                        region: outputs.region?.value || tfvars.region
+                      };
+                      
+                      console.log('Terraform execution completed successfully, resolving with result:', JSON.stringify(result, null, 2));
+                      resolveExec(result);
+                    } catch (parseError) {
+                      console.log('Output parsing failed:', parseError);
+                      
+                      // If JSON parsing fails but Phase 2 succeeded, create a basic result
+                      console.log('Creating fallback result since infrastructure was created successfully');
+                      const projectId = terraformDir.includes('consumer') ? tfvars.consumer_project_id : tfvars.producer_project_id;
+                      const fallbackResult: TerraformOutput = {
+                        ...(terraformDir.includes('consumer') 
+                          ? { consumer_project_id: projectId }
+                          : { producer_project_id: projectId }
+                        ),
+                        vpc_name: terraformDir.includes('consumer') ? 'consumer-vpc' : 'producer-vpc',
+                        subnet_name: terraformDir.includes('consumer') ? 'vm-subnet' : 'producer-subnet',
+                        region: tfvars.region
+                      };
+                      
+                      console.log('Resolving with fallback result:', JSON.stringify(fallbackResult, null, 2));
+                      resolveExec(fallbackResult);
+                    }
+                  });
+                } catch (outputError) {
+                  console.log('Output retrieval error:', outputError);
+                  rejectExec(outputError);
+                }
+              });
+            } catch (phase2Error) {
+              rejectExec(phase2Error);
+            }
+          }, 120000); // Wait 120 seconds (2 minutes) for API propagation
+        });
+        
+        return; // Exit early for non-create-vm modules
       }
       
-      const phase1Command = `terraform init && terraform apply -auto-approve ${apiTargets}`;
+      // For create-vm, go directly to Phase 2
+      console.log('Phase 2: Creating VM infrastructure...');
+      const phase2Command = 'terraform init && terraform apply -auto-approve';
       
-      exec(phase1Command, { 
+      exec(phase2Command, { 
         cwd: terraformDir,
-        env: { ...process.env, TF_VAR_project_id: tfvars.project_id, TF_VAR_region: tfvars.region }
-      }, async (error, stdout, stderr) => {
-        console.log('=== TERRAFORM PHASE 1 EXECUTION ===');
-        console.log('Command executed:', phase1Command);
-        console.log('Working directory:', terraformDir);
-        console.log('Environment variables:', {
-          TF_VAR_project_id: tfvars.project_id,
-          TF_VAR_region: tfvars.region
-        });
-        console.log('stdout:', stdout);
-        console.log('stderr:', stderr);
-        
-        if (error) {
-          console.log(`Terraform execution error (attempt ${attempt}):`, error.message);
-          console.log('Terraform stderr:', stderr);
+        env: { 
+          ...process.env, 
+          TF_VAR_consumer_project_id: tfvars.consumer_project_id,
+          TF_VAR_region: tfvars.region,
+          TF_VAR_instance_name: tfvars.instance_name,
+          TF_VAR_machine_type: tfvars.machine_type,
+          TF_VAR_os_image: tfvars.os_image
+        }
+      }, (phase2Error, phase2Stdout, phase2Stderr) => {
+        if (phase2Error) {
+          console.log('Phase 2 error:', phase2Error.message);
+          console.log('Phase 2 stderr:', phase2Stderr);
           
-          // Check if this is a permission/authentication error
-          const isPermissionError = stderr.includes('Permission denied') || 
-                                   stderr.includes('AUTH_PERMISSION_DENIED') ||
-                                   stderr.includes('403') ||
-                                   stderr.includes('forbidden') ||
-                                   stderr.includes('not authorized') ||
-                                   stderr.includes('insufficient permissions');
+          // Check if this is a permission/authentication error in Phase 2
+          const isPhase2PermissionError = phase2Stderr.includes('Permission denied') || 
+                                         phase2Stderr.includes('AUTH_PERMISSION_DENIED') ||
+                                         phase2Stderr.includes('403') ||
+                                         phase2Stderr.includes('forbidden') ||
+                                         phase2Stderr.includes('not authorized') ||
+                                         phase2Stderr.includes('insufficient permissions');
           
-          if (isPermissionError) {
-            console.log('🔴 PERMISSION ERROR DETECTED');
-            console.log('The service account does not have sufficient permissions to enable APIs or manage resources in this project.');
+          if (isPhase2PermissionError) {
+            console.log('🔴 PERMISSION ERROR DETECTED IN PHASE 2');
+            console.log('The service account does not have sufficient permissions to create VM infrastructure in this project.');
             console.log('');
             console.log('To resolve this issue, please run the following command to grant the necessary permissions:');
             console.log('');
-            console.log(`gcloud projects add-iam-policy-binding ${tfvars.project_id} \\`);
+            console.log(`gcloud projects add-iam-policy-binding ${tfvars.consumer_project_id} \\`);
             console.log('  --member="serviceAccount:central-service-account@admin-project-463522.iam.gserviceaccount.com" \\');
             console.log('  --role="roles/editor"');
             console.log('');
             console.log('Or run the provided script:');
-            console.log(`./grant-permissions.sh ${tfvars.project_id}`);
+            console.log(`./grant-permissions.sh ${tfvars.consumer_project_id}`);
             console.log('');
             console.log('After granting permissions, try the deployment again.');
             console.log('');
             
-            rejectExec(new Error(`Permission denied: Service account lacks sufficient permissions to manage project ${tfvars.project_id}. Please grant the service account 'roles/editor' permission and try again.`));
+            rejectExec(new Error(`Permission denied in VM creation: Service account lacks sufficient permissions to manage project ${tfvars.consumer_project_id}. Please grant the service account 'roles/editor' permission and try again.`));
             return;
           }
           
-          // Check if this is an API enablement error
-          const isApiError = stderr.includes('SERVICE_DISABLED') || 
-                           stderr.includes('API has not been used') || 
-                           stderr.includes('not been used in project') ||
-                           stderr.includes('Compute Engine API has not been used');
-          
-          if (isApiError && attempt < 3) {
-            const waitTime = attempt * 300; // 300s, 600s, 900s (5min, 10min, 15min)
-            console.log(`API enablement error detected. Retrying in ${waitTime} seconds... (attempt ${attempt}/3)`);
-            
-            // For the first attempt, try to manually enable the Compute Engine API
-            if (attempt === 1) {
-              console.log('Attempting to manually enable Compute Engine API...');
-              try {
-                const enableCommand = `gcloud services enable compute.googleapis.com --project=${process.env.TF_VAR_project_id || 'producer-test-project'}`;
-                exec(enableCommand, (error, stdout, stderr) => {
-                  if (error) {
-                    console.log('Manual API enablement failed, will retry with delay:', error.message);
-                  } else {
-                    console.log('Manual API enablement successful:', stdout);
-                  }
-                });
-              } catch (manualError) {
-                console.log('Manual API enablement error:', manualError);
-              }
-            }
-            
-            setTimeout(async () => {
-              try {
-                const result = await executeTerraform(terraformDir, attempt + 1);
-                resolveExec(result);
-              } catch (retryError) {
-                rejectExec(retryError);
-              }
-            }, waitTime * 1000);
-            return;
-          }
-          
-          rejectExec(new Error(`Terraform execution failed: ${error.message}`));
+          rejectExec(new Error(`Phase 2 failed: ${phase2Error.message}`));
           return;
         }
         
-        console.log('Phase 1 completed successfully. Waiting 120 seconds for API propagation...');
+        console.log('Phase 2 completed successfully');
         
-        // Wait for API propagation
-        setTimeout(async () => {
-          try {
-            // Phase 2: Create infrastructure
-            console.log('Phase 2: Creating infrastructure...');
-            const phase2Command = 'terraform apply -auto-approve';
+        // Get Terraform outputs
+        try {
+          console.log('Getting Terraform outputs...');
+          exec('terraform output -json', { cwd: terraformDir }, (outputError, outputStdout, outputStderr) => {
+            if (outputError) {
+              console.log('Output parsing error:', outputError.message);
+              console.log('Output stderr:', outputStderr);
+              
+              // If output parsing fails but Phase 2 succeeded, create a basic result
+              console.log('Creating fallback result since VM was created successfully');
+              const fallbackResult: TerraformOutput = {
+                consumer_project_id: tfvars.consumer_project_id,
+                vpc_name: 'consumer-vpc',
+                subnet_name: 'vm-subnet',
+                region: tfvars.region,
+                instance_name: tfvars.instance_name,
+                zone: `${tfvars.region}-a`,
+                vm_internal_ip: ''
+              };
+              
+              console.log('Resolving with fallback result:', JSON.stringify(fallbackResult, null, 2));
+              resolveExec(fallbackResult);
+              return;
+            }
             
-            exec(phase2Command, { 
-              cwd: terraformDir,
-              env: { ...process.env, TF_VAR_project_id: tfvars.project_id, TF_VAR_region: tfvars.region }
-            }, (phase2Error, phase2Stdout, phase2Stderr) => {
-              if (phase2Error) {
-                console.log('Phase 2 error:', phase2Error.message);
-                console.log('Phase 2 stderr:', phase2Stderr);
-                
-                // Check if this is a permission/authentication error in Phase 2
-                const isPhase2PermissionError = phase2Stderr.includes('Permission denied') || 
-                                               phase2Stderr.includes('AUTH_PERMISSION_DENIED') ||
-                                               phase2Stderr.includes('403') ||
-                                               phase2Stderr.includes('forbidden') ||
-                                               phase2Stderr.includes('not authorized') ||
-                                               phase2Stderr.includes('insufficient permissions');
-                
-                if (isPhase2PermissionError) {
-                  console.log('🔴 PERMISSION ERROR DETECTED IN PHASE 2');
-                  console.log('The service account does not have sufficient permissions to create infrastructure in this project.');
-                  console.log('');
-                  console.log('To resolve this issue, please run the following command to grant the necessary permissions:');
-                  console.log('');
-                  console.log(`gcloud projects add-iam-policy-binding ${tfvars.project_id} \\`);
-                  console.log('  --member="serviceAccount:central-service-account@admin-project-463522.iam.gserviceaccount.com" \\');
-                  console.log('  --role="roles/editor"');
-                  console.log('');
-                  console.log('Or run the provided script:');
-                  console.log(`./grant-permissions.sh ${tfvars.project_id}`);
-                  console.log('');
-                  console.log('After granting permissions, try the deployment again.');
-                  console.log('');
-                  
-                  rejectExec(new Error(`Permission denied in infrastructure creation: Service account lacks sufficient permissions to manage project ${tfvars.project_id}. Please grant the service account 'roles/editor' permission and try again.`));
-                  return;
-                }
-                
-                // Check if this is a Service Networking API propagation error
-                const isServiceNetworkingError = phase2Stderr.includes('Service Networking API has not been used') ||
-                                               phase2Stderr.includes('servicenetworking.googleapis.com') ||
-                                               phase2Stderr.includes('wait a few minutes for the action to propagate');
-                
-                if (isServiceNetworkingError && attempt < 3) {
-                  const waitTime = 180; // 3 minutes for Service Networking API propagation
-                  console.log(`Service Networking API propagation error detected. Retrying in ${waitTime} seconds... (attempt ${attempt}/3)`);
-                  
-                  // Extract the actual project ID from the error message
-                  const projectMatch = phase2Stderr.match(/project (\d+)/);
-                  const actualProjectId = projectMatch ? projectMatch[1] : tfvars.project_id;
-                  console.log(`Detected actual project ID from error: ${actualProjectId}`);
-                  
-                  // Try to manually enable Service Networking API in the correct project
-                  console.log(`Attempting to manually enable Service Networking API in project: ${actualProjectId}...`);
-                  try {
-                    const enableCommand = `gcloud services enable servicenetworking.googleapis.com --project=${actualProjectId}`;
-                    exec(enableCommand, (error, stdout, stderr) => {
-                      if (error) {
-                        console.log('Manual Service Networking API enablement failed:', error.message);
-                      } else {
-                        console.log('Manual Service Networking API enablement successful:', stdout);
-                      }
-                    });
-                  } catch (manualError) {
-                    console.log('Manual Service Networking API enablement error:', manualError);
-                  }
-                  
-                  // Also try to enable in the target project if different
-                  if (actualProjectId !== tfvars.project_id) {
-                    console.log(`Also enabling Service Networking API in target project: ${tfvars.project_id}...`);
-                    try {
-                      const enableTargetCommand = `gcloud services enable servicenetworking.googleapis.com --project=${tfvars.project_id}`;
-                      exec(enableTargetCommand, (error, stdout, stderr) => {
-                        if (error) {
-                          console.log('Manual Service Networking API enablement in target project failed:', error.message);
-                        } else {
-                          console.log('Manual Service Networking API enablement in target project successful:', stdout);
-                        }
-                      });
-                    } catch (manualError) {
-                      console.log('Manual Service Networking API enablement in target project error:', manualError);
-                    }
-                  }
-                  
-                  setTimeout(async () => {
-                    try {
-                      const result = await executeTerraform(terraformDir, attempt + 1);
-                      resolveExec(result);
-                    } catch (retryError) {
-                      rejectExec(retryError);
-                    }
-                  }, waitTime * 1000);
-                  return;
-                }
-                
-                rejectExec(new Error(`Infrastructure creation failed: ${phase2Error.message}`));
-                return;
-              }
+            try {
+              const outputs = JSON.parse(outputStdout);
+              console.log('Terraform outputs:', outputs);
               
-              console.log('Phase 2 completed successfully');
+              const result: TerraformOutput = {
+                consumer_project_id: outputs.consumer_project_id?.value || tfvars.consumer_project_id,
+                vpc_name: outputs.vpc_name?.value || 'consumer-vpc',
+                subnet_name: outputs.subnet_name?.value || 'vm-subnet',
+                region: outputs.region?.value || tfvars.region,
+                instance_name: outputs.instance_name?.value || tfvars.instance_name,
+                zone: outputs.zone?.value || `${tfvars.region}-a`,
+                vm_internal_ip: outputs.internal_ip?.value || ''
+              };
               
-              // Parse outputs
-              const outputCommand = 'terraform output -json';
-              exec(outputCommand, { cwd: terraformDir }, (outputError, outputStdout, outputStderr) => {
-                if (outputError) {
-                  console.log('Output parsing error:', outputError.message);
-                  console.log('Output stderr:', outputStderr);
-                  
-                  // If output parsing fails but Phase 2 succeeded, create a basic result
-                  console.log('Creating fallback result since infrastructure was created successfully');
-                  const fallbackResult: TerraformOutput = {
-                    success: true,
-                    vpc_name: 'producer-vpc',
-                    subnet_name: 'producer-subnet',
-                    psc_ip_range: '',
-                    psc_ip_range_name: 'psc-ip-range',
-                    vpc_self_link: '',
-                    subnet_self_link: '',
-                    project_id: tfvars.project_id,
-                    apis_enabled: {}
-                  };
-                  
-                  console.log('Resolving with fallback result:', JSON.stringify(fallbackResult, null, 2));
-                  resolveExec(fallbackResult);
-                  return;
-                }
-                
-                try {
-                  const outputs = JSON.parse(outputStdout);
-                  console.log('Terraform outputs:', outputs);
-                  
-                  const result: TerraformOutput = {
-                    success: true,
-                    vpc_name: outputs.vpc_name?.value || 'producer-vpc',
-                    subnet_name: outputs.subnet_name?.value || 'producer-subnet',
-                    psc_ip_range: outputs.psc_ip_range?.value || '',
-                    psc_ip_range_name: outputs.psc_ip_range_name?.value || 'psc-ip-range',
-                    vpc_self_link: outputs.vpc_self_link?.value || '',
-                    subnet_self_link: outputs.subnet_self_link?.value || '',
-                    project_id: outputs.project_id?.value || tfvars.project_id,
-                    apis_enabled: outputs.apis_enabled?.value || {}
-                  };
-                  
-                  console.log('Terraform execution completed successfully, resolving with result:', JSON.stringify(result, null, 2));
-                  resolveExec(result);
-                } catch (parseError) {
-                  console.log('Output parsing failed:', parseError);
-                  
-                  // If JSON parsing fails but Phase 2 succeeded, create a basic result
-                  console.log('Creating fallback result since infrastructure was created successfully');
-                  const fallbackResult: TerraformOutput = {
-                    success: true,
-                    vpc_name: 'producer-vpc',
-                    subnet_name: 'producer-subnet',
-                    psc_ip_range: '',
-                    psc_ip_range_name: 'psc-ip-range',
-                    vpc_self_link: '',
-                    subnet_self_link: '',
-                    project_id: tfvars.project_id,
-                    apis_enabled: {}
-                  };
-                  
-                  console.log('Resolving with fallback result:', JSON.stringify(fallbackResult, null, 2));
-                  resolveExec(fallbackResult);
-                }
-              });
-            });
-          } catch (phase2Error) {
-            rejectExec(phase2Error);
-          }
-        }, 120000); // Wait 120 seconds (2 minutes) for API propagation
+              console.log('Terraform execution completed successfully, resolving with result:', JSON.stringify(result, null, 2));
+              resolveExec(result);
+            } catch (parseError) {
+              console.log('Output parsing failed:', parseError);
+              
+              // If JSON parsing fails but Phase 2 succeeded, create a basic result
+              console.log('Creating fallback result since VM was created successfully');
+              const fallbackResult: TerraformOutput = {
+                consumer_project_id: tfvars.consumer_project_id,
+                vpc_name: 'consumer-vpc',
+                subnet_name: 'vm-subnet',
+                region: tfvars.region,
+                instance_name: tfvars.instance_name,
+                zone: `${tfvars.region}-a`,
+                vm_internal_ip: ''
+              };
+              
+              console.log('Resolving with fallback result:', JSON.stringify(fallbackResult, null, 2));
+              resolveExec(fallbackResult);
+            }
+          });
+        } catch (outputError) {
+          console.log('Output retrieval error:', outputError);
+          rejectExec(outputError);
+        }
       });
       
     } catch (error) {
@@ -510,31 +710,27 @@ export function getTerraformOutput(folder: string): Promise<TerraformOutput> {
         
         // Convert the raw Terraform output format to our interface
         const output: TerraformOutput = {
-          success: true,
+          producer_project_id: rawOutput.producer_project_id?.value || '',
           vpc_name: rawOutput.vpc_name?.value || '',
           subnet_name: rawOutput.subnet_name?.value || '',
-          psc_ip_range: rawOutput.psc_ip_range?.value || '',
-          psc_ip_range_name: rawOutput.psc_ip_range_name?.value || '',
-          vpc_self_link: rawOutput.vpc_self_link?.value || '',
-          subnet_self_link: rawOutput.subnet_self_link?.value || '',
-          project_id: rawOutput.project_id?.value || '',
-          apis_enabled: rawOutput.apis_enabled?.value || {},
-          // SQL-specific outputs
           region: rawOutput.region?.value || '',
+          zone: rawOutput.zone?.value || '',
           instance_name: rawOutput.instance_name?.value || '',
+          port: rawOutput.port?.value || undefined,
+          instance_group_name: rawOutput.instance_group_name?.value || '',
+          backend_service_name: rawOutput.backend_service_name?.value || '',
+          health_check_name: rawOutput.health_check_name?.value || '',
+          forwarding_rule_name: rawOutput.forwarding_rule_name?.value || '',
+          service_attachment_name: rawOutput.service_attachment_name?.value || '',
+          service_attachment_uri: rawOutput.service_attachment_uri?.value || '',
+          allowed_consumer_project_id: rawOutput.allowed_consumer_project_id?.value || '',
+          consumer_project_id: rawOutput.consumer_project_id?.value || '',
           instance_connection_name: rawOutput.instance_connection_name?.value || '',
           private_ip_address: rawOutput.private_ip_address?.value || '',
           database_name: rawOutput.database_name?.value || '',
           user_name: rawOutput.user_name?.value || '',
-          allowed_consumer_project_id: rawOutput.allowed_consumer_project_id?.value || '',
-          service_attachment_uri: rawOutput.service_attachment_uri?.value || '',
-          // Consumer-specific outputs
-          vm_subnet_name: rawOutput.vm_subnet_name?.value || '',
-          psc_subnet_name: rawOutput.psc_subnet_name?.value || '',
-          vm_subnet_self_link: rawOutput.vm_subnet_self_link?.value || '',
-          psc_subnet_self_link: rawOutput.psc_subnet_self_link?.value || '',
-          psc_ip_address: rawOutput.psc_ip_address?.value || '',
-          psc_endpoint_name: rawOutput.psc_endpoint_name?.value || ''
+          vm_instance_name: rawOutput.vm_instance_name?.value || '',
+          vm_internal_ip: rawOutput.vm_internal_ip?.value || ''
         };
         
         console.log('🟢 OUTPUT CHECKPOINT 4: Terraform outputs parsed successfully');

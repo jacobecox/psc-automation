@@ -1,4 +1,5 @@
 terraform {
+  required_version = ">= 0.13"
   required_providers {
     google = {
       source  = "hashicorp/google"
@@ -8,8 +9,9 @@ terraform {
 }
 
 provider "google" {
-  project = var.project_id
+  project = var.producer_project_id
   region  = var.region
+  zone    = var.zone
 }
 
 # Get VPC information

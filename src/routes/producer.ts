@@ -42,7 +42,7 @@ router.post('/deploy/producer', async (req: Request, res: Response): Promise<voi
     console.log(`Starting producer deployment for project: ${producer_project_id} in region: ${region}`);
 
     // Set environment variables for Terraform
-    process.env.TF_VAR_project_id = producer_project_id;
+    process.env.TF_VAR_producer_project_id = producer_project_id;
     process.env.TF_VAR_region = region;
 
     const vars = req.body;
@@ -50,7 +50,7 @@ router.post('/deploy/producer', async (req: Request, res: Response): Promise<voi
 
     // Optional: validate that required vars exist
     const requiredVars = [
-      "project_id",
+      "producer_project_id",
       "region",
       "zone",
       "vpc_name",
@@ -85,7 +85,7 @@ router.post('/deploy/producer', async (req: Request, res: Response): Promise<voi
 
       // Get the service attachment URI
       const serviceAttachmentUri = await getServiceAttachmentUri(
-        mergedVars.project_id as string,
+        mergedVars.producer_project_id as string,
         mergedVars.region as string,
         mergedVars.service_attachment_name as string
       );
@@ -94,7 +94,7 @@ router.post('/deploy/producer', async (req: Request, res: Response): Promise<voi
       try {
         const consumerResponse = await axios.post('http://localhost:3000/consumer/deploy/consumer', {
           service_attachment_uri: serviceAttachmentUri,
-          project_id: "test-project-2-462619",
+          consumer_project_id: "consumer-test-project-463821",
           region: "us-central1",
           vpc_name: "consumer-vpc",
           subnet_name: "consumer-subnet",
@@ -135,11 +135,11 @@ router.post('/deploy/producer', async (req: Request, res: Response): Promise<voi
 // Add status endpoint for consistency
 router.get('/status/producer', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { project_id } = req.query;
+    const { producer_project_id } = req.query;
 
-    if (!project_id || typeof project_id !== 'string') {
+    if (!producer_project_id || typeof producer_project_id !== 'string') {
       res.status(400).json({ 
-        error: 'Invalid project_id query parameter. Must be a non-empty string.',
+        error: 'Invalid producer_project_id query parameter. Must be a non-empty string.',
         details: 'Please provide a valid GCP project ID'
       });
       return;
@@ -150,7 +150,7 @@ router.get('/status/producer', async (req: Request, res: Response): Promise<void
       
       res.status(200).json({
         message: 'Producer infrastructure status retrieved successfully',
-        project_id: project_id,
+        producer_project_id: producer_project_id,
         terraform_output: outputs
       });
 
@@ -158,7 +158,7 @@ router.get('/status/producer', async (req: Request, res: Response): Promise<void
       console.error('Failed to get Terraform outputs:', terraformError);
       res.status(404).json({ 
         error: 'Producer infrastructure not found or not deployed',
-        project_id: project_id,
+        producer_project_id: producer_project_id,
         details: terraformError instanceof Error ? terraformError.message : 'Unknown error'
       });
     }

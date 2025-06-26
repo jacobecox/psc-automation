@@ -1,32 +1,30 @@
-variable "project_id" {
+variable "producer_project_id" {
   description = "The GCP project ID for the producer"
   type        = string
-  default     = "producer-test-project"
 }
 
 variable "region" {
-  description = "The region where the Cloud SQL instance will be created"
+  description = "The GCP region for the SQL instance"
   type        = string
   default     = "us-central1"
 }
 
 variable "instance_id" {
-  description = "The instance ID for the Cloud SQL instance"
+  description = "The name of the SQL instance"
   type        = string
   default     = "producer-sql"
 }
 
 variable "default_password" {
-  description = "The default password for the postgres user"
+  description = "The default password for the SQL instance"
   type        = string
   default     = "postgres"
   sensitive   = true
 }
 
 variable "allowed_consumer_project_id" {
-  description = "The project ID allowed for private service connect"
+  description = "The GCP project ID for the consumer that will be allowed to connect"
   type        = string
-  default     = "consumer-test-project-463821"
 }
 
 variable "tier" {

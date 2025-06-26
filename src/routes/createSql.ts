@@ -22,7 +22,7 @@ interface CreateSqlRequest {
 
 interface CreateSqlResponse {
   message: string;
-  project_id: string;
+  producer_project_id: string;
   region: string;
   instance_id: string;
   instance_connection_name: string;
@@ -214,7 +214,7 @@ router.post('/deploy/create-sql', async (req: Request, res: Response): Promise<v
     console.log('🟢 CHECKPOINT 5: Preparing Terraform variables');
     // Prepare Terraform variables
     const terraformVariables: TerraformVariables = {
-      project_id: producer_project_id,
+      producer_project_id: producer_project_id,
       region: region,
       instance_id: instance_id,
       default_password: default_password,
@@ -266,7 +266,7 @@ router.post('/deploy/create-sql', async (req: Request, res: Response): Promise<v
         message: pscCompleted 
           ? 'SQL infrastructure deployed successfully with PSC enabled'
           : 'SQL infrastructure deployed successfully, but PSC enablement timed out',
-        project_id: outputs.project_id || producer_project_id,
+        producer_project_id: producer_project_id,
         region: outputs.region || region,
         instance_id: outputs.instance_name || instance_id,
         instance_connection_name: outputs.instance_connection_name || '',
@@ -326,7 +326,7 @@ router.post('/deploy/create-sql', async (req: Request, res: Response): Promise<v
       
       const errorResponse: CreateSqlResponse = {
         message: isPscTimeout || isPscSuccess ? 'SQL infrastructure deployed successfully (PSC in progress)' : 'SQL deployment failed',
-        project_id: producer_project_id,
+        producer_project_id: producer_project_id,
         region: region,
         instance_id: instance_id,
         instance_connection_name: '',
@@ -386,7 +386,7 @@ router.get('/status/create-sql', async (req: Request, res: Response): Promise<vo
       
       const response: CreateSqlResponse = {
         message: 'SQL infrastructure status retrieved successfully',
-        project_id: outputs.project_id || producer_project_id as string,
+        producer_project_id: producer_project_id,
         region: outputs.region || 'us-central1',
         instance_id: outputs.instance_name || 'producer-sql',
         instance_connection_name: outputs.instance_connection_name || '',
@@ -404,7 +404,7 @@ router.get('/status/create-sql', async (req: Request, res: Response): Promise<vo
       console.error('Failed to get Terraform outputs:', terraformError);
       res.status(404).json({ 
         error: 'SQL infrastructure not found or not deployed',
-        project_id: producer_project_id,
+        producer_project_id: producer_project_id,
         details: terraformError instanceof Error ? terraformError.message : 'Unknown error'
       });
     }

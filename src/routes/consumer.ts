@@ -2,6 +2,7 @@ import express, { Request, Response, Router } from 'express';
 import { executeTerraform, getTerraformOutput, TerraformVariables } from '../utils/terraformExecutor.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import axios from 'axios';
 
 const router: Router = express.Router();
 router.use(express.json());
@@ -14,7 +15,7 @@ interface ConsumerRequest {
 
 interface ConsumerResponse {
   message: string;
-  project_id: string;
+  consumer_project_id: string;
   region: string;
   vpc_name: string;
   vm_subnet_name: string;
@@ -27,6 +28,8 @@ interface ConsumerResponse {
   service_attachment_uri: string;
   terraform_output?: any;
   error?: string;
+  vm_info?: any;
+  vm_error?: string;
 }
 
 router.post('/deploy/consumer', async (req: Request, res: Response): Promise<void> => {
@@ -118,16 +121,16 @@ router.post('/deploy/consumer', async (req: Request, res: Response): Promise<voi
       // Prepare response
       const response: ConsumerResponse = {
         message: 'Consumer infrastructure deployed successfully',
-        project_id: terraformResult.project_id,
+        consumer_project_id: terraformResult.consumer_project_id || consumer_project_id,
         region: region,
         vpc_name: terraformResult.vpc_name || 'consumer-vpc',
-        vm_subnet_name: terraformResult.vm_subnet_name || 'vm-subnet',
-        psc_subnet_name: terraformResult.psc_subnet_name || 'psc-subnet',
-        vpc_self_link: terraformResult.vpc_self_link || '',
-        vm_subnet_self_link: terraformResult.vm_subnet_self_link || '',
-        psc_subnet_self_link: terraformResult.psc_subnet_self_link || '',
-        psc_ip_address: terraformResult.psc_ip_address || '',
-        psc_endpoint_name: terraformResult.psc_endpoint_name || 'psc-endpoint',
+        vm_subnet_name: terraformResult.subnet_name || 'vm-subnet',
+        psc_subnet_name: terraformResult.subnet_name || 'psc-subnet',
+        vpc_self_link: '',
+        vm_subnet_self_link: '',
+        psc_subnet_self_link: '',
+        psc_ip_address: '',
+        psc_endpoint_name: 'psc-endpoint',
         service_attachment_uri: terraformResult.service_attachment_uri || service_attachment_uri,
         terraform_output: terraformResult
       };
@@ -182,6 +185,34 @@ router.post('/deploy/consumer', async (req: Request, res: Response): Promise<voi
       
       console.log('Response sent and ended successfully');
       
+      // Create VM in the consumer VPC after successful deployment
+      console.log('🟢 CHECKPOINT 10: Starting automatic VM creation');
+      try {
+        console.log('Calling create-vm route to create VM in consumer VPC...');
+        const vmResponse = await axios.post('http://localhost:3000/api/create-vm/deploy/create-vm', {
+          consumer_project_id: consumer_project_id,
+          region: region,
+          instance_name: 'consumer-vm',
+          machine_type: 'e2-micro',
+          os_image: 'debian-cloud/debian-12'
+        });
+        
+        console.log('🟢 CHECKPOINT 11: VM creation successful');
+        console.log('VM creation response:', JSON.stringify(vmResponse.data, null, 2));
+        
+        // Update the response to include VM information
+        response.message = 'Consumer infrastructure and VM deployed successfully';
+        response.vm_info = vmResponse.data;
+        
+      } catch (vmError) {
+        console.log('🟡 CHECKPOINT 11: VM creation failed, but consumer infrastructure was successful');
+        console.error('VM creation error:', vmError);
+        
+        // Don't fail the entire request, just log the VM creation failure
+        response.message = 'Consumer infrastructure deployed successfully, but VM creation failed';
+        response.vm_error = vmError instanceof Error ? vmError.message : 'Unknown VM creation error';
+      }
+      
       // Ensure the function completes
       return;
 
@@ -199,7 +230,7 @@ router.post('/deploy/consumer', async (req: Request, res: Response): Promise<voi
       
       const errorResponse: ConsumerResponse = {
         message: 'Consumer deployment failed',
-        project_id: consumer_project_id,
+        consumer_project_id: consumer_project_id,
         region: region,
         vpc_name: '',
         vm_subnet_name: '',
@@ -210,7 +241,9 @@ router.post('/deploy/consumer', async (req: Request, res: Response): Promise<voi
         psc_ip_address: '',
         psc_endpoint_name: '',
         service_attachment_uri: service_attachment_uri,
-        error: terraformError instanceof Error ? terraformError.message : 'Unknown Terraform error occurred'
+        error: terraformError instanceof Error ? terraformError.message : 'Unknown Terraform error occurred',
+        vm_info: undefined,
+        vm_error: undefined
       };
 
       // Set comprehensive response headers for better compatibility
@@ -285,11 +318,11 @@ router.post('/deploy/consumer', async (req: Request, res: Response): Promise<voi
 // Add a route to get the current state of the consumer
 router.get('/status/consumer', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { project_id } = req.query;
+    const { consumer_project_id } = req.query;
 
-    if (!project_id || typeof project_id !== 'string') {
+    if (!consumer_project_id || typeof consumer_project_id !== 'string') {
       res.status(400).json({ 
-        error: 'Invalid project_id query parameter. Must be a non-empty string.',
+        error: 'Invalid consumer_project_id query parameter. Must be a non-empty string.',
         details: 'Please provide a valid GCP project ID'
       });
       return;
@@ -300,16 +333,16 @@ router.get('/status/consumer', async (req: Request, res: Response): Promise<void
       
       const response: ConsumerResponse = {
         message: 'Consumer infrastructure status retrieved successfully',
-        project_id: project_id as string,
+        consumer_project_id: consumer_project_id as string,
         region: outputs.region || 'us-central1',
         vpc_name: outputs.vpc_name || 'consumer-vpc',
-        vm_subnet_name: outputs.vm_subnet_name || 'vm-subnet',
-        psc_subnet_name: outputs.psc_subnet_name || 'psc-subnet',
-        vpc_self_link: outputs.vpc_self_link || '',
-        vm_subnet_self_link: outputs.vm_subnet_self_link || '',
-        psc_subnet_self_link: outputs.psc_subnet_self_link || '',
-        psc_ip_address: outputs.psc_ip_address || '',
-        psc_endpoint_name: outputs.psc_endpoint_name || 'psc-endpoint',
+        vm_subnet_name: outputs.subnet_name || 'vm-subnet',
+        psc_subnet_name: outputs.subnet_name || 'psc-subnet',
+        vpc_self_link: '',
+        vm_subnet_self_link: '',
+        psc_subnet_self_link: '',
+        psc_ip_address: '',
+        psc_endpoint_name: 'psc-endpoint',
         service_attachment_uri: outputs.service_attachment_uri || '',
         terraform_output: outputs
       };
@@ -320,7 +353,7 @@ router.get('/status/consumer', async (req: Request, res: Response): Promise<void
       console.error('Failed to get Terraform outputs:', terraformError);
       res.status(404).json({ 
         error: 'Consumer infrastructure not found or not deployed',
-        project_id: project_id,
+        consumer_project_id: consumer_project_id,
         details: terraformError instanceof Error ? terraformError.message : 'Unknown error'
       });
     }
