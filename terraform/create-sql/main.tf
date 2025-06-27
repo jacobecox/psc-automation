@@ -9,37 +9,21 @@ terraform {
 }
 
 provider "google" {
-  project = var.producer_project_id
+  project = var.project_id
   region  = var.region
 }
 
-# Enable required APIs
-resource "google_project_service" "sqladmin" {
-  project = var.producer_project_id
-  service = "sqladmin.googleapis.com"
-  disable_dependent_services = false
+# Use existing producer VPC
+data "google_compute_network" "producer_vpc" {
+  name    = "producer-vpc"
+  project = var.project_id
 }
 
-resource "google_project_service" "servicenetworking" {
-  project = var.producer_project_id
-  service = "servicenetworking.googleapis.com"
-  disable_dependent_services = false
-}
-
-# Create VPC for SQL instance
-resource "google_compute_network" "sql_vpc" {
-  name                    = "sql-vpc"
-  auto_create_subnetworks = false
-  project                 = var.producer_project_id
-}
-
-# Create subnet for SQL instance
-resource "google_compute_subnetwork" "sql_subnet" {
-  name          = "sql-subnet"
-  ip_cidr_range = "10.0.0.0/24"
-  network       = google_compute_network.sql_vpc.id
-  region        = var.region
-  project       = var.producer_project_id
+# Use existing producer subnet
+data "google_compute_subnetwork" "producer_subnet" {
+  name    = "producer-subnet"
+  project = var.project_id
+  region  = var.region
 }
 
 # Create Cloud SQL instance
@@ -47,19 +31,14 @@ resource "google_sql_database_instance" "producer_sql" {
   name             = var.instance_id
   database_version = "POSTGRES_17"
   region           = var.region
-  project          = var.producer_project_id
-
-  depends_on = [
-    google_project_service.sqladmin,
-    google_project_service.servicenetworking
-  ]
+  project          = var.project_id
 
   settings {
     tier = "db-f1-micro"
     
     ip_configuration {
       ipv4_enabled    = false
-      private_network = google_compute_network.sql_vpc.id
+      private_network = data.google_compute_network.producer_vpc.id
       require_ssl     = false
     }
 
@@ -84,7 +63,7 @@ resource "google_sql_database_instance" "producer_sql" {
 resource "google_sql_database" "database" {
   name     = "mydb"
   instance = google_sql_database_instance.producer_sql.name
-  project  = var.producer_project_id
+  project  = var.project_id
 }
 
 # Create user
@@ -92,41 +71,142 @@ resource "google_sql_user" "users" {
   name     = "postgres"
   instance = google_sql_database_instance.producer_sql.name
   password = var.default_password
-  project  = var.producer_project_id
+  project  = var.project_id
 }
 
 # Enable Private Service Connect
 resource "null_resource" "enable_psc" {
   depends_on = [google_sql_database_instance.producer_sql]
 
+  triggers = {
+    # Force re-execution when consumer projects change
+    allowed_consumer_project_ids = join(",", var.allowed_consumer_project_ids)
+    # Force re-execution when PSC is not enabled (check via data source)
+    psc_enabled = data.google_sql_database_instance.producer_sql_data.settings[0].ip_configuration[0].psc_config != null ? "enabled" : "disabled"
+    # Also trigger on timestamp to ensure it runs at least once
+    timestamp = timestamp()
+  }
+
   provisioner "local-exec" {
     command = <<-EOT
-      echo "Enabling Private Service Connect for SQL instance..."
-      echo "Project: ${var.producer_project_id}"
-      echo "Consumer Project: ${var.allowed_consumer_project_id}"
+      echo "Checking and enabling Private Service Connect for SQL instance..."
+      echo "Project: ${var.project_id}"
+      echo "Consumer Projects: ${join(",", var.allowed_consumer_project_ids)}"
       
       # Wait for SQL instance to be ready
       echo "Waiting for SQL instance to be ready..."
       gcloud sql instances describe ${google_sql_database_instance.producer_sql.name} \
-        --project=${var.producer_project_id} \
+        --project=${var.project_id} \
         --format="value(state)" | grep -q "RUNNABLE" || \
         (echo "SQL instance not ready yet, waiting..." && sleep 30)
       
-      # Enable PSC
-      echo "Enabling Private Service Connect..."
-      gcloud sql instances patch ${google_sql_database_instance.producer_sql.name} \
-        --project=${var.producer_project_id} \
+      # Check if PSC is already enabled
+      echo "Checking current PSC status..."
+      PSC_STATUS=$(gcloud sql instances describe ${google_sql_database_instance.producer_sql.name} \
+        --project=${var.project_id} \
+        --format="value(settings.ipConfiguration.pscConfig.pscEnabled)" 2>/dev/null || echo "False")
+      
+      echo "Current PSC status: $PSC_STATUS"
+      
+      if [ "$PSC_STATUS" = "True" ]; then
+        echo "PSC is already enabled, checking consumer projects..."
+        
+        # Check if consumer projects are already allowed
+        CURRENT_CONSUMERS=$(gcloud sql instances describe ${google_sql_database_instance.producer_sql.name} \
+          --project=${var.project_id} \
+          --format="value(settings.ipConfiguration.pscConfig.allowedConsumerProjects)" 2>/dev/null || echo "")
+        
+        echo "Current allowed consumers: $CURRENT_CONSUMERS"
+        
+        # Check if our consumer projects are already in the list
+        ALL_CONSUMERS_SET=true
+        for consumer in ${join(" ", var.allowed_consumer_project_ids)}; do
+          if [[ "$CURRENT_CONSUMERS" != *"$consumer"* ]]; then
+            echo "Consumer project $consumer not found in allowed list, updating..."
+            ALL_CONSUMERS_SET=false
+            break
+          fi
+        done
+        
+        if [ "$ALL_CONSUMERS_SET" = "true" ]; then
+          echo "All consumer projects already allowed, PSC setup complete"
+          exit 0
+        fi
+      fi
+      
+      # Wait for any pending operations to complete
+      echo "Checking for pending operations..."
+      PENDING_OPS=$(gcloud sql operations list --project=${var.project_id} --instance=${google_sql_database_instance.producer_sql.name} --filter="status=PENDING" --format="value(name)" 2>/dev/null || echo "")
+      if [ -n "$PENDING_OPS" ]; then
+        echo "Found pending operations, waiting for them to complete..."
+        while [ -n "$(gcloud sql operations list --project=${var.project_id} --instance=${google_sql_database_instance.producer_sql.name} --filter="status=PENDING" --format="value(name)" 2>/dev/null)" ]; do
+          echo "Still waiting for pending operations..."
+          sleep 30
+        done
+        echo "All pending operations completed"
+      fi
+      
+      # Enable PSC and set consumer projects in a single command
+      echo "Enabling Private Service Connect and setting consumer projects..."
+      CONSUMER_PROJECTS_CSV="${join(",", var.allowed_consumer_project_ids)}"
+      echo "Setting PSC enabled=true and allowed projects to: $CONSUMER_PROJECTS_CSV"
+      
+      # Try the combined command first
+      if gcloud sql instances patch ${google_sql_database_instance.producer_sql.name} \
+        --project=${var.project_id} \
         --enable-private-service-connect \
-        --quiet || echo "PSC enablement failed or already enabled"
+        --allowed-psc-projects=$CONSUMER_PROJECTS_CSV \
+        --quiet; then
+        echo "Successfully enabled PSC and set consumer projects in single command"
+      else
+        echo "Combined command failed, trying separate commands..."
+        
+        # Fallback: Enable PSC first
+        echo "Enabling Private Service Connect..."
+        if ! gcloud sql instances patch ${google_sql_database_instance.producer_sql.name} \
+          --project=${var.project_id} \
+          --enable-private-service-connect \
+          --quiet; then
+          echo "PSC enablement failed, checking if already enabled..."
+          # Check if PSC is now enabled
+          NEW_PSC_STATUS=$(gcloud sql instances describe ${google_sql_database_instance.producer_sql.name} \
+            --project=${var.project_id} \
+            --format="value(settings.ipConfiguration.pscConfig.pscEnabled)" 2>/dev/null || echo "False")
+          if [ "$NEW_PSC_STATUS" != "True" ]; then
+            echo "ERROR: PSC enablement failed and PSC is still not enabled"
+            exit 1
+          fi
+        fi
+        
+        # Wait a moment for PSC to be fully enabled
+        echo "Waiting for PSC to be fully enabled..."
+        sleep 10
+        
+        # Then set consumer projects
+        echo "Setting allowed PSC projects..."
+        if ! gcloud sql instances patch ${google_sql_database_instance.producer_sql.name} \
+          --project=${var.project_id} \
+          --allowed-psc-projects=$CONSUMER_PROJECTS_CSV \
+          --quiet; then
+          echo "ERROR: Failed to set allowed PSC projects"
+          exit 1
+        fi
+      fi
       
-      # Allow consumer project
-      echo "Allowing consumer project to connect..."
-      gcloud sql instances patch ${google_sql_database_instance.producer_sql.name} \
-        --project=${var.producer_project_id} \
-        --allowed-psc-projects=${var.allowed_consumer_project_id} \
-        --quiet || echo "Consumer project allowance failed or already set"
+      # Verify the consumer projects were set
+      echo "Verifying consumer projects were set..."
+      sleep 5
+      FINAL_CONSUMERS=$(gcloud sql instances describe ${google_sql_database_instance.producer_sql.name} \
+        --project=${var.project_id} \
+        --format="value(settings.ipConfiguration.pscConfig.allowedConsumerProjects)" 2>/dev/null || echo "")
+      echo "Final allowed consumers: $FINAL_CONSUMERS"
       
-      echo "Private Service Connect setup completed"
+      if [ -z "$FINAL_CONSUMERS" ]; then
+        echo "ERROR: Consumer projects verification failed - no projects found"
+        exit 1
+      fi
+      
+      echo "Private Service Connect setup completed successfully"
     EOT
   }
 }
@@ -134,7 +214,7 @@ resource "null_resource" "enable_psc" {
 # Get the service attachment URI
 data "google_sql_database_instance" "producer_sql_data" {
   name    = google_sql_database_instance.producer_sql.name
-  project = var.producer_project_id
+  project = var.project_id
 }
 
 # Outputs
@@ -168,17 +248,17 @@ output "region" {
   value       = google_sql_database_instance.producer_sql.region
 }
 
-output "producer_project_id" {
-  description = "The producer project ID"
-  value       = var.producer_project_id
+output "project_id" {
+  description = "The project ID"
+  value       = var.project_id
 }
 
-output "allowed_consumer_project_id" {
-  description = "The allowed consumer project ID"
-  value       = var.allowed_consumer_project_id
+output "allowed_consumer_project_ids" {
+  description = "The allowed consumer project IDs"
+  value       = var.allowed_consumer_project_ids
 }
 
 output "service_attachment_uri" {
   description = "The service attachment URI for Private Service Connect"
-  value       = "projects/${var.producer_project_id}/regions/${var.region}/serviceAttachments/${google_sql_database_instance.producer_sql.name}-psc"
+  value       = "projects/${var.project_id}/regions/${var.region}/serviceAttachments/${google_sql_database_instance.producer_sql.name}-psc"
 } 

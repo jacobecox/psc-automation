@@ -5,11 +5,11 @@ import fs from 'fs';
 import dotenv from 'dotenv';
 
 export interface TerraformVariables {
-  [key: string]: string | number | boolean;
+  [key: string]: string | number | boolean | string[];
 }
 
 export interface TerraformOutput {
-  producer_project_id?: string;
+  project_id: string;
   region?: string;
   zone?: string;
   vpc_name?: string;
@@ -22,7 +22,7 @@ export interface TerraformOutput {
   forwarding_rule_name?: string;
   service_attachment_name?: string;
   service_attachment_uri?: string;
-  allowed_consumer_project_id?: string;
+  allowed_consumer_project_ids?: string[];
   consumer_project_id?: string;
   instance_connection_name?: string;
   private_ip_address?: string;
@@ -30,6 +30,10 @@ export interface TerraformOutput {
   user_name?: string;
   vm_instance_name?: string;
   vm_internal_ip?: string;
+  psc_ip_range?: string;
+  psc_ip_range_name?: string;
+  vpc_self_link?: string;
+  subnet_self_link?: string;
 }
 
 // Helper function to wait for a specified time
@@ -41,6 +45,46 @@ function wait(ms: number): Promise<void> {
 export async function pollForPscCompletion(projectId: string, instanceName: string, maxWaitMinutes: number = 30): Promise<boolean> {
   console.log(`🟡 PSC POLLING: Starting PSC completion polling for ${instanceName} in project ${projectId}`);
   console.log(`🟡 PSC POLLING: Will poll for up to ${maxWaitMinutes} minutes`);
+  
+  // First, check if PSC is already enabled
+  console.log(`🟡 PSC POLLING: Checking initial PSC status...`);
+  try {
+    const { exec } = await import('child_process');
+    const checkPsc = () => new Promise<string>((resolve, reject) => {
+      exec(`gcloud sql instances describe ${instanceName} --project=${projectId} --format="value(settings.ipConfiguration.pscConfig.pscEnabled)"`, 
+        (error, stdout, stderr) => {
+          if (error) {
+            reject(error);
+          } else {
+            resolve(stdout.trim());
+          }
+        });
+    });
+    
+    const initialPscStatus = await checkPsc();
+    console.log(`🟡 PSC POLLING: Initial PSC status: ${initialPscStatus}`);
+    
+    if (initialPscStatus === 'True') {
+      console.log('🟢 PSC POLLING: PSC is already enabled!');
+      return true;
+    }
+    
+    // If PSC is not enabled, trigger Terraform to run again
+    console.log('🟡 PSC POLLING: PSC is not enabled, triggering Terraform to enable it...');
+    const { execSync } = await import('child_process');
+    try {
+      execSync('terraform apply -auto-approve', { 
+        cwd: path.resolve(process.cwd(), 'terraform/create-sql'),
+        stdio: 'pipe'
+      });
+      console.log('🟢 PSC POLLING: Terraform apply completed, PSC enablement should be in progress');
+    } catch (terraformError) {
+      console.log('🟡 PSC POLLING: Terraform apply failed or no changes needed, continuing with polling...');
+    }
+    
+  } catch (error) {
+    console.log(`🟡 PSC POLLING: Error checking initial PSC status: ${error}, continuing with polling...`);
+  }
   
   const maxAttempts = maxWaitMinutes * 2; // Check every 30 seconds
   let attempts = 0;
@@ -121,7 +165,7 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
       
       // Set default values for environment variables
       const defaultVars = {
-        producer_project_id: process.env.TF_VAR_producer_project_id || 'producer-test-project',
+        project_id: process.env.TF_VAR_project_id || 'producer-test-project',
         region: process.env.TF_VAR_region || 'us-central1',
         zone: process.env.TF_VAR_zone || 'us-central1-a',
         vpc_name: process.env.TF_VAR_vpc_name || 'producer-vpc',
@@ -134,7 +178,7 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
         forwarding_rule_name: process.env.TF_VAR_forwarding_rule_name || 'producer-forwarding-rule',
         service_attachment_name: process.env.TF_VAR_service_attachment_name || 'producer-attachment',
         consumer_project_id: process.env.TF_VAR_consumer_project_id || 'consumer-test-project-463821',
-        allowed_consumer_project_id: process.env.TF_VAR_allowed_consumer_project_id || 'consumer-test-project-463821'
+        allowed_consumer_project_ids: process.env.TF_VAR_allowed_consumer_project_ids || ['consumer-test-project-463821']
       };
       
       // Determine which variables to include based on the Terraform directory
@@ -177,7 +221,7 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
           if (terraformDir.includes('create-vm') || terraformDir.includes('consumer')) {
             targetProject = tfvars.consumer_project_id;
           } else {
-            targetProject = tfvars.producer_project_id;
+            targetProject = tfvars.project_id;
           }
           
           console.log(`Target project: ${targetProject}`);
@@ -194,7 +238,7 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
       if (terraformDir.includes('create-vm') || terraformDir.includes('consumer')) {
         targetProject = tfvars.consumer_project_id;
       } else {
-        targetProject = tfvars.producer_project_id;
+        targetProject = tfvars.project_id;
       }
       
       console.log(`Switching gcloud project to: ${targetProject}`);
@@ -228,10 +272,46 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
         });
       });
       
-      // Phase 1: Enable APIs only (skip for create-vm)
-      if (terraformDir.includes('create-vm')) {
-        console.log('Skipping API enablement for create-vm module (APIs already enabled by consumer route)');
-        console.log('Phase 2: Creating VM infrastructure...');
+      // Phase 1: Enable APIs only (skip for create-vm and create-sql)
+      if (terraformDir.includes('create-vm') || terraformDir.includes('create-sql')) {
+        console.log('Skipping API enablement for create-vm/create-sql module (APIs already enabled by previous Terraform)');
+        console.log('Phase 2: Creating infrastructure...');
+        
+        // Execute Phase 2 directly for create-vm and create-sql
+        const phase2Command = 'terraform init && terraform apply -auto-approve';
+        
+        exec(phase2Command, { 
+          cwd: terraformDir,
+          env: { 
+            ...process.env, 
+            ...(terraformDir.includes('consumer') 
+              ? {
+                  TF_VAR_project_id: tfvars.consumer_project_id,
+                  TF_VAR_region: tfvars.region
+                }
+              : {
+                  TF_VAR_project_id: tfvars.project_id,
+                  TF_VAR_region: tfvars.region
+                }
+            )
+          }
+        }, (phase2Error, phase2Stdout, phase2Stderr) => {
+          if (phase2Error) {
+            console.log('Phase 2 error:', phase2Error.message);
+            console.log('Phase 2 stderr:', phase2Stderr);
+            rejectExec(new Error(`Phase 2 failed: ${phase2Error.message}`));
+            return;
+          }
+          
+          console.log('🟢 TERRAFORM CHECKPOINT 6: Terraform execution completed successfully');
+          console.log('🟢 TERRAFORM CHECKPOINT 6d: Full stdout:', phase2Stdout);
+          console.log('🟢 TERRAFORM CHECKPOINT 6e: Full stderr:', phase2Stderr);
+          
+          // Get Terraform outputs
+          getTerraformOutput(terraformDir.split('/').pop() || '')
+            .then(output => resolveExec(output))
+            .catch(error => rejectExec(error));
+        });
       } else {
         console.log('Phase 1: Enabling required APIs...');
         
@@ -262,7 +342,7 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
                   TF_VAR_region: tfvars.region
                 }
               : {
-                  TF_VAR_producer_project_id: tfvars.producer_project_id,
+                  TF_VAR_project_id: tfvars.project_id,
                   TF_VAR_region: tfvars.region
                 }
             )
@@ -277,7 +357,7 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
                 TF_VAR_region: tfvars.region
               }
             : {
-                TF_VAR_producer_project_id: tfvars.producer_project_id,
+                TF_VAR_project_id: tfvars.project_id,
                 TF_VAR_region: tfvars.region
               }
           );
@@ -302,7 +382,7 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
               console.log('');
               console.log('To resolve this issue, please run the following command to grant the necessary permissions:');
               console.log('');
-              const projectId = terraformDir.includes('consumer') ? tfvars.consumer_project_id : tfvars.producer_project_id;
+              const projectId = terraformDir.includes('consumer') ? tfvars.consumer_project_id : tfvars.project_id;
               console.log(`gcloud projects add-iam-policy-binding ${projectId} \\`);
               console.log('  --member="serviceAccount:central-service-account@admin-project-463522.iam.gserviceaccount.com" \\');
               console.log('  --role="roles/editor"');
@@ -331,7 +411,7 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
               if (attempt === 1) {
                 console.log('Attempting to manually enable Compute Engine API...');
                 try {
-                  const projectId = terraformDir.includes('consumer') ? tfvars.consumer_project_id : tfvars.producer_project_id;
+                  const projectId = terraformDir.includes('consumer') ? tfvars.consumer_project_id : tfvars.project_id;
                   const enableCommand = `gcloud services enable compute.googleapis.com --project=${projectId}`;
                   exec(enableCommand, (error, stdout, stderr) => {
                     if (error) {
@@ -379,7 +459,7 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
                         TF_VAR_region: tfvars.region
                       }
                     : {
-                        TF_VAR_producer_project_id: tfvars.producer_project_id,
+                        TF_VAR_project_id: tfvars.project_id,
                         TF_VAR_region: tfvars.region
                       }
                   )
@@ -403,7 +483,7 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
                     console.log('');
                     console.log('To resolve this issue, please run the following command to grant the necessary permissions:');
                     console.log('');
-                    const projectId = terraformDir.includes('consumer') ? tfvars.consumer_project_id : tfvars.producer_project_id;
+                    const projectId = terraformDir.includes('consumer') ? tfvars.consumer_project_id : tfvars.project_id;
                     console.log(`gcloud projects add-iam-policy-binding ${projectId} \\`);
                     console.log('  --member="serviceAccount:central-service-account@admin-project-463522.iam.gserviceaccount.com" \\');
                     console.log('  --role="roles/editor"');
@@ -429,7 +509,7 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
                     
                     // Extract the actual project ID from the error message
                     const projectMatch = phase2Stderr.match(/project (\d+)/);
-                    const projectId = terraformDir.includes('consumer') ? tfvars.consumer_project_id : tfvars.producer_project_id;
+                    const projectId = terraformDir.includes('consumer') ? tfvars.consumer_project_id : tfvars.project_id;
                     const actualProjectId = projectMatch ? projectMatch[1] : projectId;
                     console.log(`Detected actual project ID from error: ${actualProjectId}`);
                     
@@ -492,14 +572,15 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
                       
                       // If output parsing fails but Phase 2 succeeded, create a basic result
                       console.log('Creating fallback result since infrastructure was created successfully');
-                      const projectId = terraformDir.includes('consumer') ? tfvars.consumer_project_id : tfvars.producer_project_id;
+                      const projectId = terraformDir.includes('consumer') ? tfvars.consumer_project_id : tfvars.project_id;
                       const fallbackResult: TerraformOutput = {
+                        project_id: projectId,
                         ...(terraformDir.includes('consumer') 
                           ? { consumer_project_id: projectId }
-                          : { producer_project_id: projectId }
+                          : { }
                         ),
                         vpc_name: terraformDir.includes('consumer') ? 'consumer-vpc' : 'producer-vpc',
-                        subnet_name: terraformDir.includes('consumer') ? 'vm-subnet' : 'producer-subnet',
+                        subnet_name: terraformDir.includes('consumer') ? 'consumer-subnet' : 'producer-subnet',
                         region: tfvars.region
                       };
                       
@@ -512,15 +593,37 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
                       const outputs = JSON.parse(outputStdout);
                       console.log('Terraform outputs:', outputs);
                       
-                      const projectId = terraformDir.includes('consumer') ? tfvars.consumer_project_id : tfvars.producer_project_id;
+                      const projectId = terraformDir.includes('consumer') ? tfvars.consumer_project_id : tfvars.project_id;
                       const result: TerraformOutput = {
+                        project_id: projectId,
                         ...(terraformDir.includes('consumer') 
                           ? { consumer_project_id: outputs.consumer_project_id?.value || projectId }
-                          : { producer_project_id: outputs.producer_project_id?.value || projectId }
+                          : { }
                         ),
                         vpc_name: outputs.vpc_name?.value || (terraformDir.includes('consumer') ? 'consumer-vpc' : 'producer-vpc'),
-                        subnet_name: outputs.subnet_name?.value || (terraformDir.includes('consumer') ? 'vm-subnet' : 'producer-subnet'),
-                        region: outputs.region?.value || tfvars.region
+                        subnet_name: outputs.subnet_name?.value || (terraformDir.includes('consumer') ? 'consumer-subnet' : 'producer-subnet'),
+                        region: outputs.region?.value || tfvars.region,
+                        zone: outputs.zone?.value || tfvars.zone,
+                        instance_name: outputs.instance_name?.value || tfvars.instance_name,
+                        port: outputs.port?.value || tfvars.port,
+                        instance_group_name: outputs.instance_group_name?.value || tfvars.instance_group_name,
+                        backend_service_name: outputs.backend_service_name?.value || tfvars.backend_service_name,
+                        health_check_name: outputs.health_check_name?.value || tfvars.health_check_name,
+                        forwarding_rule_name: outputs.forwarding_rule_name?.value || tfvars.forwarding_rule_name,
+                        service_attachment_name: outputs.service_attachment_name?.value || tfvars.service_attachment_name,
+                        service_attachment_uri: outputs.service_attachment_uri?.value || '',
+                        allowed_consumer_project_ids: outputs.allowed_consumer_project_ids?.value || tfvars.allowed_consumer_project_ids,
+                        consumer_project_id: outputs.consumer_project_id?.value || tfvars.consumer_project_id,
+                        instance_connection_name: outputs.instance_connection_name?.value || '',
+                        private_ip_address: outputs.private_ip_address?.value || '',
+                        database_name: outputs.database_name?.value || '',
+                        user_name: outputs.user_name?.value || '',
+                        vm_instance_name: outputs.vm_instance_name?.value || '',
+                        vm_internal_ip: outputs.vm_internal_ip?.value || '',
+                        psc_ip_range: outputs.psc_ip_range?.value || '',
+                        psc_ip_range_name: outputs.psc_ip_range_name?.value || '',
+                        vpc_self_link: outputs.vpc_self_link?.value || '',
+                        subnet_self_link: outputs.subnet_self_link?.value || ''
                       };
                       
                       console.log('Terraform execution completed successfully, resolving with result:', JSON.stringify(result, null, 2));
@@ -530,14 +633,15 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
                       
                       // If JSON parsing fails but Phase 2 succeeded, create a basic result
                       console.log('Creating fallback result since infrastructure was created successfully');
-                      const projectId = terraformDir.includes('consumer') ? tfvars.consumer_project_id : tfvars.producer_project_id;
+                      const projectId = terraformDir.includes('consumer') ? tfvars.consumer_project_id : tfvars.project_id;
                       const fallbackResult: TerraformOutput = {
+                        project_id: projectId,
                         ...(terraformDir.includes('consumer') 
                           ? { consumer_project_id: projectId }
-                          : { producer_project_id: projectId }
+                          : { }
                         ),
                         vpc_name: terraformDir.includes('consumer') ? 'consumer-vpc' : 'producer-vpc',
-                        subnet_name: terraformDir.includes('consumer') ? 'vm-subnet' : 'producer-subnet',
+                        subnet_name: terraformDir.includes('consumer') ? 'consumer-subnet' : 'producer-subnet',
                         region: tfvars.region
                       };
                       
@@ -555,128 +659,7 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
             }
           }, 120000); // Wait 120 seconds (2 minutes) for API propagation
         });
-        
-        return; // Exit early for non-create-vm modules
       }
-      
-      // For create-vm, go directly to Phase 2
-      console.log('Phase 2: Creating VM infrastructure...');
-      const phase2Command = 'terraform init && terraform apply -auto-approve';
-      
-      exec(phase2Command, { 
-        cwd: terraformDir,
-        env: { 
-          ...process.env, 
-          TF_VAR_consumer_project_id: tfvars.consumer_project_id,
-          TF_VAR_region: tfvars.region,
-          TF_VAR_instance_name: tfvars.instance_name,
-          TF_VAR_machine_type: tfvars.machine_type,
-          TF_VAR_os_image: tfvars.os_image
-        }
-      }, (phase2Error, phase2Stdout, phase2Stderr) => {
-        if (phase2Error) {
-          console.log('Phase 2 error:', phase2Error.message);
-          console.log('Phase 2 stderr:', phase2Stderr);
-          
-          // Check if this is a permission/authentication error in Phase 2
-          const isPhase2PermissionError = phase2Stderr.includes('Permission denied') || 
-                                         phase2Stderr.includes('AUTH_PERMISSION_DENIED') ||
-                                         phase2Stderr.includes('403') ||
-                                         phase2Stderr.includes('forbidden') ||
-                                         phase2Stderr.includes('not authorized') ||
-                                         phase2Stderr.includes('insufficient permissions');
-          
-          if (isPhase2PermissionError) {
-            console.log('🔴 PERMISSION ERROR DETECTED IN PHASE 2');
-            console.log('The service account does not have sufficient permissions to create VM infrastructure in this project.');
-            console.log('');
-            console.log('To resolve this issue, please run the following command to grant the necessary permissions:');
-            console.log('');
-            console.log(`gcloud projects add-iam-policy-binding ${tfvars.consumer_project_id} \\`);
-            console.log('  --member="serviceAccount:central-service-account@admin-project-463522.iam.gserviceaccount.com" \\');
-            console.log('  --role="roles/editor"');
-            console.log('');
-            console.log('Or run the provided script:');
-            console.log(`./grant-permissions.sh ${tfvars.consumer_project_id}`);
-            console.log('');
-            console.log('After granting permissions, try the deployment again.');
-            console.log('');
-            
-            rejectExec(new Error(`Permission denied in VM creation: Service account lacks sufficient permissions to manage project ${tfvars.consumer_project_id}. Please grant the service account 'roles/editor' permission and try again.`));
-            return;
-          }
-          
-          rejectExec(new Error(`Phase 2 failed: ${phase2Error.message}`));
-          return;
-        }
-        
-        console.log('Phase 2 completed successfully');
-        
-        // Get Terraform outputs
-        try {
-          console.log('Getting Terraform outputs...');
-          exec('terraform output -json', { cwd: terraformDir }, (outputError, outputStdout, outputStderr) => {
-            if (outputError) {
-              console.log('Output parsing error:', outputError.message);
-              console.log('Output stderr:', outputStderr);
-              
-              // If output parsing fails but Phase 2 succeeded, create a basic result
-              console.log('Creating fallback result since VM was created successfully');
-              const fallbackResult: TerraformOutput = {
-                consumer_project_id: tfvars.consumer_project_id,
-                vpc_name: 'consumer-vpc',
-                subnet_name: 'vm-subnet',
-                region: tfvars.region,
-                instance_name: tfvars.instance_name,
-                zone: `${tfvars.region}-a`,
-                vm_internal_ip: ''
-              };
-              
-              console.log('Resolving with fallback result:', JSON.stringify(fallbackResult, null, 2));
-              resolveExec(fallbackResult);
-              return;
-            }
-            
-            try {
-              const outputs = JSON.parse(outputStdout);
-              console.log('Terraform outputs:', outputs);
-              
-              const result: TerraformOutput = {
-                consumer_project_id: outputs.consumer_project_id?.value || tfvars.consumer_project_id,
-                vpc_name: outputs.vpc_name?.value || 'consumer-vpc',
-                subnet_name: outputs.subnet_name?.value || 'vm-subnet',
-                region: outputs.region?.value || tfvars.region,
-                instance_name: outputs.instance_name?.value || tfvars.instance_name,
-                zone: outputs.zone?.value || `${tfvars.region}-a`,
-                vm_internal_ip: outputs.internal_ip?.value || ''
-              };
-              
-              console.log('Terraform execution completed successfully, resolving with result:', JSON.stringify(result, null, 2));
-              resolveExec(result);
-            } catch (parseError) {
-              console.log('Output parsing failed:', parseError);
-              
-              // If JSON parsing fails but Phase 2 succeeded, create a basic result
-              console.log('Creating fallback result since VM was created successfully');
-              const fallbackResult: TerraformOutput = {
-                consumer_project_id: tfvars.consumer_project_id,
-                vpc_name: 'consumer-vpc',
-                subnet_name: 'vm-subnet',
-                region: tfvars.region,
-                instance_name: tfvars.instance_name,
-                zone: `${tfvars.region}-a`,
-                vm_internal_ip: ''
-              };
-              
-              console.log('Resolving with fallback result:', JSON.stringify(fallbackResult, null, 2));
-              resolveExec(fallbackResult);
-            }
-          });
-        } catch (outputError) {
-          console.log('Output retrieval error:', outputError);
-          rejectExec(outputError);
-        }
-      });
       
     } catch (error) {
       console.log('Terraform execution setup error:', error);
@@ -710,7 +693,7 @@ export function getTerraformOutput(folder: string): Promise<TerraformOutput> {
         
         // Convert the raw Terraform output format to our interface
         const output: TerraformOutput = {
-          producer_project_id: rawOutput.producer_project_id?.value || '',
+          project_id: rawOutput.project_id?.value || '',
           vpc_name: rawOutput.vpc_name?.value || '',
           subnet_name: rawOutput.subnet_name?.value || '',
           region: rawOutput.region?.value || '',
@@ -723,14 +706,18 @@ export function getTerraformOutput(folder: string): Promise<TerraformOutput> {
           forwarding_rule_name: rawOutput.forwarding_rule_name?.value || '',
           service_attachment_name: rawOutput.service_attachment_name?.value || '',
           service_attachment_uri: rawOutput.service_attachment_uri?.value || '',
-          allowed_consumer_project_id: rawOutput.allowed_consumer_project_id?.value || '',
+          allowed_consumer_project_ids: rawOutput.allowed_consumer_project_ids?.value || [],
           consumer_project_id: rawOutput.consumer_project_id?.value || '',
           instance_connection_name: rawOutput.instance_connection_name?.value || '',
           private_ip_address: rawOutput.private_ip_address?.value || '',
           database_name: rawOutput.database_name?.value || '',
           user_name: rawOutput.user_name?.value || '',
           vm_instance_name: rawOutput.vm_instance_name?.value || '',
-          vm_internal_ip: rawOutput.vm_internal_ip?.value || ''
+          vm_internal_ip: rawOutput.vm_internal_ip?.value || '',
+          psc_ip_range: rawOutput.psc_ip_range?.value || '',
+          psc_ip_range_name: rawOutput.psc_ip_range_name?.value || '',
+          vpc_self_link: rawOutput.vpc_self_link?.value || '',
+          subnet_self_link: rawOutput.subnet_self_link?.value || ''
         };
         
         console.log('🟢 OUTPUT CHECKPOINT 4: Terraform outputs parsed successfully');

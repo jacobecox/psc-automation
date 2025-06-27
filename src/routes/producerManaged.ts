@@ -8,7 +8,7 @@ const router: Router = express.Router();
 router.use(express.json());
 
 interface ProducerManagedRequest {
-  producer_project_id?: string;
+  project_id: string;
   region?: string;
   // SQL configuration parameters
   instance_id?: string;
@@ -60,15 +60,15 @@ router.post('/deploy/managed', async (req: Request, res: Response): Promise<void
 
   try {
     const { 
-      producer_project_id = "test-project-2-462619", 
+      project_id = "test-project-2-462619", 
       region = "us-central1"
     } = req.body as ProducerManagedRequest;
 
     // Validate the project ID
-    if (!producer_project_id || typeof producer_project_id !== 'string') {
+    if (!project_id || typeof project_id !== 'string') {
       clearTimeout(timeout);
       res.status(400).json({ 
-        error: 'Invalid producer_project_id. Must be a non-empty string.',
+        error: 'Invalid project_id. Must be a non-empty string.',
         details: 'Please provide a valid GCP project ID'
       });
       return;
@@ -84,10 +84,10 @@ router.post('/deploy/managed', async (req: Request, res: Response): Promise<void
       return;
     }
 
-    console.log(`Starting managed producer deployment for project: ${producer_project_id} in region: ${region}`);
+    console.log(`Starting managed producer deployment for project: ${project_id} in region: ${region}`);
 
     // Set environment variables for Terraform
-    process.env.TF_VAR_project_id = producer_project_id;
+    process.env.TF_VAR_project_id = project_id;
     process.env.TF_VAR_region = region;
 
     try {
@@ -105,7 +105,7 @@ router.post('/deploy/managed', async (req: Request, res: Response): Promise<void
       // Prepare base response
       const response: ProducerManagedResponse = {
         message: 'Managed Producer infrastructure deployed successfully',
-        project_id: terraformResult.project_id,
+        project_id: terraformResult.project_id || project_id,
         region: region,
         vpc_name: terraformResult.vpc_name || '',
         subnet_name: terraformResult.subnet_name || '',
@@ -122,19 +122,11 @@ router.post('/deploy/managed', async (req: Request, res: Response): Promise<void
         
         // Prepare SQL creation variables
         const sqlVariables = {
-          project_id: producer_project_id,
+          project_id: project_id,
           region: region,
           instance_id: "producer-sql",
           default_password: "postgres",
-          allowed_consumer_project_id: "consumer-test-project-463821",
-          tier: "db-f1-micro",
-          database_version: "POSTGRES_17",
-          deletion_protection: false,
-          backup_enabled: true,
-          backup_start_time: "02:00",
-          maintenance_day: 7,
-          maintenance_hour: 2,
-          maintenance_update_track: "stable"
+          allowed_consumer_project_ids: ["consumer-test-project-463821"]
         };
 
         // Run SQL creation using the same logic as createSql route
@@ -150,7 +142,7 @@ router.post('/deploy/managed', async (req: Request, res: Response): Promise<void
         // Poll for PSC completion
         console.log('Starting PSC completion polling for automatic SQL creation...');
         const pscCompleted = await pollForPscCompletion(
-          producer_project_id,
+          project_id,
           sqlOutputs.instance_name || 'producer-sql',
           30 // 30 minutes timeout
         );
@@ -267,7 +259,7 @@ router.post('/deploy/managed', async (req: Request, res: Response): Promise<void
       
       const errorResponse: ProducerManagedResponse = {
         message: 'Managed Producer deployment failed',
-        project_id: producer_project_id,
+        project_id: project_id,
         region: region,
         vpc_name: '',
         subnet_name: '',

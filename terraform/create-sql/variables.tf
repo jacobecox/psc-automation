@@ -1,4 +1,4 @@
-variable "producer_project_id" {
+variable "project_id" {
   description = "The GCP project ID for the producer"
   type        = string
 }
@@ -22,9 +22,9 @@ variable "default_password" {
   sensitive   = true
 }
 
-variable "allowed_consumer_project_id" {
-  description = "The GCP project ID for the consumer that will be allowed to connect"
-  type        = string
+variable "allowed_consumer_project_ids" {
+  description = "The GCP project IDs for the consumers that will be allowed to connect"
+  type        = list(string)
 }
 
 variable "tier" {
