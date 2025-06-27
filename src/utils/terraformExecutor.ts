@@ -23,7 +23,6 @@ export interface TerraformOutput {
   service_attachment_name?: string;
   service_attachment_uri?: string;
   allowed_consumer_project_ids?: string[];
-  consumer_project_id?: string;
   instance_connection_name?: string;
   private_ip_address?: string;
   database_name?: string;
@@ -163,10 +162,10 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
       // Generate terraform.tfvars.json
       const tfvarsPath = path.join(terraformDir, 'terraform.tfvars.json');
       
-      // Set default values for environment variables
+      // Set required values for environment variables (no defaults for project_id or region)
       const defaultVars = {
-        project_id: process.env.TF_VAR_project_id || 'producer-test-project',
-        region: process.env.TF_VAR_region || 'us-central1',
+        project_id: process.env.TF_VAR_project_id,
+        region: process.env.TF_VAR_region,
         zone: process.env.TF_VAR_zone || 'us-central1-a',
         vpc_name: process.env.TF_VAR_vpc_name || 'producer-vpc',
         subnet_name: process.env.TF_VAR_subnet_name || 'producer-subnet',
@@ -177,8 +176,7 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
         health_check_name: process.env.TF_VAR_health_check_name || 'tcp-hc',
         forwarding_rule_name: process.env.TF_VAR_forwarding_rule_name || 'producer-forwarding-rule',
         service_attachment_name: process.env.TF_VAR_service_attachment_name || 'producer-attachment',
-        consumer_project_id: process.env.TF_VAR_consumer_project_id || 'consumer-test-project-463821',
-        allowed_consumer_project_ids: process.env.TF_VAR_allowed_consumer_project_ids || ['consumer-test-project-463821']
+        allowed_consumer_project_ids: process.env.TF_VAR_allowed_consumer_project_ids ? JSON.parse(process.env.TF_VAR_allowed_consumer_project_ids) : undefined
       };
       
       // Determine which variables to include based on the Terraform directory
@@ -196,7 +194,7 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
       } else if (terraformDir.includes('create-vm')) {
         // Create-vm specific variables - only include what's declared in variables.tf
         tfvars = {
-          consumer_project_id: tfvars.consumer_project_id,
+          project_id: tfvars.project_id,
           region: tfvars.region,
           instance_name: tfvars.instance_name,
           machine_type: tfvars.machine_type,
@@ -219,7 +217,7 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
           // Determine the target project based on the Terraform directory
           let targetProject;
           if (terraformDir.includes('create-vm') || terraformDir.includes('consumer')) {
-            targetProject = tfvars.consumer_project_id;
+            targetProject = tfvars.project_id;
           } else {
             targetProject = tfvars.project_id;
           }
@@ -236,7 +234,7 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
       // Switch gcloud project to match target project
       let targetProject;
       if (terraformDir.includes('create-vm') || terraformDir.includes('consumer')) {
-        targetProject = tfvars.consumer_project_id;
+        targetProject = tfvars.project_id;
       } else {
         targetProject = tfvars.project_id;
       }
@@ -284,16 +282,8 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
           cwd: terraformDir,
           env: { 
             ...process.env, 
-            ...(terraformDir.includes('consumer') 
-              ? {
-                  TF_VAR_project_id: tfvars.consumer_project_id,
-                  TF_VAR_region: tfvars.region
-                }
-              : {
-                  TF_VAR_project_id: tfvars.project_id,
-                  TF_VAR_region: tfvars.region
-                }
-            )
+            TF_VAR_project_id: tfvars.project_id,
+            TF_VAR_region: tfvars.region
           }
         }, (phase2Error, phase2Stdout, phase2Stderr) => {
           if (phase2Error) {
@@ -336,16 +326,8 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
           cwd: terraformDir,
           env: { 
             ...process.env, 
-            ...(terraformDir.includes('consumer') 
-              ? {
-                  TF_VAR_project_id: tfvars.consumer_project_id,
-                  TF_VAR_region: tfvars.region
-                }
-              : {
-                  TF_VAR_project_id: tfvars.project_id,
-                  TF_VAR_region: tfvars.region
-                }
-            )
+            TF_VAR_project_id: tfvars.project_id,
+            TF_VAR_region: tfvars.region
           }
         }, async (error, stdout, stderr) => {
           console.log('=== TERRAFORM PHASE 1 EXECUTION ===');
@@ -353,7 +335,7 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
           console.log('Working directory:', terraformDir);
           console.log('Environment variables:', terraformDir.includes('consumer')
             ? {
-                TF_VAR_project_id: tfvars.consumer_project_id,
+                TF_VAR_project_id: tfvars.project_id,
                 TF_VAR_region: tfvars.region
               }
             : {
@@ -382,7 +364,7 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
               console.log('');
               console.log('To resolve this issue, please run the following command to grant the necessary permissions:');
               console.log('');
-              const projectId = terraformDir.includes('consumer') ? tfvars.consumer_project_id : tfvars.project_id;
+              const projectId = tfvars.project_id;
               console.log(`gcloud projects add-iam-policy-binding ${projectId} \\`);
               console.log('  --member="serviceAccount:central-service-account@admin-project-463522.iam.gserviceaccount.com" \\');
               console.log('  --role="roles/editor"');
@@ -404,14 +386,14 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
                              stderr.includes('Compute Engine API has not been used');
             
             if (isApiError && attempt < 3) {
-              const waitTime = attempt * 300; // 300s, 600s, 900s (5min, 10min, 15min)
-              console.log(`API enablement error detected. Retrying in ${waitTime} seconds... (attempt ${attempt}/3)`);
+              const waitTime = attempt * 60; // 1min/2min/3min for SQL, 2min/4min/6min for others
+              console.log(`🟡 TERRAFORM CHECKPOINT RETRY: Error detected. Retrying in ${waitTime} seconds... (attempt ${attempt}/3)`);
               
               // For the first attempt, try to manually enable the Compute Engine API
               if (attempt === 1) {
                 console.log('Attempting to manually enable Compute Engine API...');
                 try {
-                  const projectId = terraformDir.includes('consumer') ? tfvars.consumer_project_id : tfvars.project_id;
+                  const projectId = tfvars.project_id;
                   const enableCommand = `gcloud services enable compute.googleapis.com --project=${projectId}`;
                   exec(enableCommand, (error, stdout, stderr) => {
                     if (error) {
@@ -440,7 +422,7 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
             return;
           }
           
-          console.log('Phase 1 completed successfully. Waiting 120 seconds for API propagation...');
+          console.log('Phase 1 completed successfully. Waiting 60 seconds for API propagation...');
           
           // Wait for API propagation
           setTimeout(async () => {
@@ -453,16 +435,8 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
                 cwd: terraformDir,
                 env: { 
                   ...process.env, 
-                  ...(terraformDir.includes('consumer')
-                    ? {
-                        TF_VAR_project_id: tfvars.consumer_project_id,
-                        TF_VAR_region: tfvars.region
-                      }
-                    : {
-                        TF_VAR_project_id: tfvars.project_id,
-                        TF_VAR_region: tfvars.region
-                      }
-                  )
+                  TF_VAR_project_id: tfvars.project_id,
+                  TF_VAR_region: tfvars.region
                 }
               }, (phase2Error, phase2Stdout, phase2Stderr) => {
                 if (phase2Error) {
@@ -483,7 +457,7 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
                     console.log('');
                     console.log('To resolve this issue, please run the following command to grant the necessary permissions:');
                     console.log('');
-                    const projectId = terraformDir.includes('consumer') ? tfvars.consumer_project_id : tfvars.project_id;
+                    const projectId = tfvars.project_id;
                     console.log(`gcloud projects add-iam-policy-binding ${projectId} \\`);
                     console.log('  --member="serviceAccount:central-service-account@admin-project-463522.iam.gserviceaccount.com" \\');
                     console.log('  --role="roles/editor"');
@@ -509,7 +483,7 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
                     
                     // Extract the actual project ID from the error message
                     const projectMatch = phase2Stderr.match(/project (\d+)/);
-                    const projectId = terraformDir.includes('consumer') ? tfvars.consumer_project_id : tfvars.project_id;
+                    const projectId = tfvars.project_id;
                     const actualProjectId = projectMatch ? projectMatch[1] : projectId;
                     console.log(`Detected actual project ID from error: ${actualProjectId}`);
                     
@@ -572,13 +546,9 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
                       
                       // If output parsing fails but Phase 2 succeeded, create a basic result
                       console.log('Creating fallback result since infrastructure was created successfully');
-                      const projectId = terraformDir.includes('consumer') ? tfvars.consumer_project_id : tfvars.project_id;
+                      const projectId = tfvars.project_id;
                       const fallbackResult: TerraformOutput = {
                         project_id: projectId,
-                        ...(terraformDir.includes('consumer') 
-                          ? { consumer_project_id: projectId }
-                          : { }
-                        ),
                         vpc_name: terraformDir.includes('consumer') ? 'consumer-vpc' : 'producer-vpc',
                         subnet_name: terraformDir.includes('consumer') ? 'consumer-subnet' : 'producer-subnet',
                         region: tfvars.region
@@ -593,13 +563,9 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
                       const outputs = JSON.parse(outputStdout);
                       console.log('Terraform outputs:', outputs);
                       
-                      const projectId = terraformDir.includes('consumer') ? tfvars.consumer_project_id : tfvars.project_id;
+                      const projectId = tfvars.project_id;
                       const result: TerraformOutput = {
                         project_id: projectId,
-                        ...(terraformDir.includes('consumer') 
-                          ? { consumer_project_id: outputs.consumer_project_id?.value || projectId }
-                          : { }
-                        ),
                         vpc_name: outputs.vpc_name?.value || (terraformDir.includes('consumer') ? 'consumer-vpc' : 'producer-vpc'),
                         subnet_name: outputs.subnet_name?.value || (terraformDir.includes('consumer') ? 'consumer-subnet' : 'producer-subnet'),
                         region: outputs.region?.value || tfvars.region,
@@ -613,7 +579,6 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
                         service_attachment_name: outputs.service_attachment_name?.value || tfvars.service_attachment_name,
                         service_attachment_uri: outputs.service_attachment_uri?.value || '',
                         allowed_consumer_project_ids: outputs.allowed_consumer_project_ids?.value || tfvars.allowed_consumer_project_ids,
-                        consumer_project_id: outputs.consumer_project_id?.value || tfvars.consumer_project_id,
                         instance_connection_name: outputs.instance_connection_name?.value || '',
                         private_ip_address: outputs.private_ip_address?.value || '',
                         database_name: outputs.database_name?.value || '',
@@ -633,13 +598,9 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
                       
                       // If JSON parsing fails but Phase 2 succeeded, create a basic result
                       console.log('Creating fallback result since infrastructure was created successfully');
-                      const projectId = terraformDir.includes('consumer') ? tfvars.consumer_project_id : tfvars.project_id;
+                      const projectId = tfvars.project_id;
                       const fallbackResult: TerraformOutput = {
                         project_id: projectId,
-                        ...(terraformDir.includes('consumer') 
-                          ? { consumer_project_id: projectId }
-                          : { }
-                        ),
                         vpc_name: terraformDir.includes('consumer') ? 'consumer-vpc' : 'producer-vpc',
                         subnet_name: terraformDir.includes('consumer') ? 'consumer-subnet' : 'producer-subnet',
                         region: tfvars.region
@@ -657,7 +618,7 @@ export async function executeTerraform(terraformDir: string, attempt: number = 1
             } catch (phase2Error) {
               rejectExec(phase2Error);
             }
-          }, 120000); // Wait 120 seconds (2 minutes) for API propagation
+          }, 60000); // Wait 60 seconds (1 minute) for API propagation
         });
       }
       
@@ -707,7 +668,6 @@ export function getTerraformOutput(folder: string): Promise<TerraformOutput> {
           service_attachment_name: rawOutput.service_attachment_name?.value || '',
           service_attachment_uri: rawOutput.service_attachment_uri?.value || '',
           allowed_consumer_project_ids: rawOutput.allowed_consumer_project_ids?.value || [],
-          consumer_project_id: rawOutput.consumer_project_id?.value || '',
           instance_connection_name: rawOutput.instance_connection_name?.value || '',
           private_ip_address: rawOutput.private_ip_address?.value || '',
           database_name: rawOutput.database_name?.value || '',
@@ -760,12 +720,80 @@ export function runTerraform(folder: string, variables?: TerraformVariables): Pr
     // Create terraform.tfvars.json if variables are provided
     if (variables) {
       console.log('🟡 TERRAFORM CHECKPOINT 2: Creating terraform.tfvars.json');
+      console.log('🟡 TERRAFORM CHECKPOINT 2a: Variables received:', JSON.stringify(variables, null, 2));
       const tfvarsPath = path.join(dir, 'terraform.tfvars.json');
       fs.writeFileSync(tfvarsPath, JSON.stringify(variables, null, 2));
       console.log(`terraform.tfvars.json written to ${tfvarsPath}`);
+      
+      // Verify the file was written correctly
+      const writtenContent = fs.readFileSync(tfvarsPath, 'utf8');
+      console.log('🟡 TERRAFORM CHECKPOINT 2b: Content written to tfvars file:', writtenContent);
+      
+      // Parse and verify the content
+      try {
+        const parsedContent = JSON.parse(writtenContent);
+        console.log('🟡 TERRAFORM CHECKPOINT 2c: Parsed tfvars content:', JSON.stringify(parsedContent, null, 2));
+        if (parsedContent.allowed_consumer_project_ids) {
+          console.log('🟡 TERRAFORM CHECKPOINT 2d: allowed_consumer_project_ids array length:', parsedContent.allowed_consumer_project_ids.length);
+          console.log('🟡 TERRAFORM CHECKPOINT 2e: allowed_consumer_project_ids values:', parsedContent.allowed_consumer_project_ids);
+        }
+      } catch (parseError) {
+        console.log('🔴 TERRAFORM CHECKPOINT 2f: Error parsing written tfvars file:', parseError);
+      }
     }
     
     console.log('🟡 TERRAFORM CHECKPOINT 3: Starting Terraform execution in directory:', dir);
+    
+    // Manage Terraform workspaces for project isolation
+    console.log('🟡 TERRAFORM CHECKPOINT 3a: Managing Terraform workspace');
+    const projectId = String(variables?.project_id || 'default');
+    const workspaceName = projectId.replace(/[^a-zA-Z0-9-_]/g, '-');
+    
+    await new Promise<void>((resolve, reject) => {
+      // Initialize Terraform first
+      exec('terraform init', { cwd: dir }, (initError, initStdout, initStderr) => {
+        if (initError) {
+          console.log('🟡 TERRAFORM CHECKPOINT 3b: Terraform init failed:', initError.message);
+          reject(initError);
+          return;
+        }
+        
+        // List existing workspaces
+        exec('terraform workspace list', { cwd: dir }, (listError, listStdout, listStderr) => {
+          if (listError) {
+            console.log('🟡 TERRAFORM CHECKPOINT 3c: Could not list workspaces:', listError.message);
+            reject(listError);
+            return;
+          }
+          
+          const workspaces = listStdout.split('\n').filter(w => w.trim());
+          
+          if (workspaces.includes(workspaceName)) {
+            console.log(`🟡 TERRAFORM CHECKPOINT 3d: Switching to existing workspace: ${workspaceName}`);
+            exec(`terraform workspace select ${workspaceName}`, { cwd: dir }, (selectError, selectStdout, selectStderr) => {
+              if (selectError) {
+                console.log('🟡 TERRAFORM CHECKPOINT 3e: Failed to switch to workspace:', selectError.message);
+                reject(selectError);
+              } else {
+                console.log(`✅ Switched to workspace: ${workspaceName}`);
+                resolve();
+              }
+            });
+          } else {
+            console.log(`🟡 TERRAFORM CHECKPOINT 3d: Creating new workspace: ${workspaceName}`);
+            exec(`terraform workspace new ${workspaceName}`, { cwd: dir }, (newError, newStdout, newStderr) => {
+              if (newError) {
+                console.log('🟡 TERRAFORM CHECKPOINT 3e: Failed to create workspace:', newError.message);
+                reject(newError);
+              } else {
+                console.log(`✅ Created and switched to workspace: ${workspaceName}`);
+                resolve();
+              }
+            });
+          }
+        });
+      });
+    });
     
     // Function to execute Terraform with retry logic
     const executeTerraformWithRetry = async (attempt: number = 1): Promise<string> => {
@@ -836,7 +864,7 @@ export function runTerraform(folder: string, variables?: TerraformVariables): Pr
             }
             
             if ((isApiError || isPscError) && attempt < 3) {
-              const waitTime = isSqlModule ? attempt * 300 : attempt * 120; // 5min/10min/15min for SQL, 2min/4min/6min for others
+              const waitTime = isSqlModule ? attempt * 60 : attempt * 120; // 1min/2min/3min for SQL, 2min/4min/6min for others
               console.log(`🟡 TERRAFORM CHECKPOINT RETRY: Error detected. Retrying in ${waitTime} seconds... (attempt ${attempt}/3)`);
               
               setTimeout(async () => {

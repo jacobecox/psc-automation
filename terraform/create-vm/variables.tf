@@ -1,12 +1,11 @@
-variable "consumer_project_id" {
-  description = "The consumer project ID where the VM will be created"
+variable "project_id" {
+  description = "The project ID where the VM will be created"
   type        = string
 }
 
 variable "region" {
   description = "The region where the VM will be created"
   type        = string
-  default     = "us-central1"
 }
 
 variable "instance_name" {

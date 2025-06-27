@@ -92,6 +92,9 @@ resource "null_resource" "enable_psc" {
       echo "Checking and enabling Private Service Connect for SQL instance..."
       echo "Project: ${var.project_id}"
       echo "Consumer Projects: ${join(",", var.allowed_consumer_project_ids)}"
+      echo "DEBUG: Number of consumer projects: ${length(var.allowed_consumer_project_ids)}"
+      echo "DEBUG: Consumer projects array: ${jsonencode(var.allowed_consumer_project_ids)}"
+      echo "DEBUG: Consumer projects joined: ${join(",", var.allowed_consumer_project_ids)}"
       
       # Wait for SQL instance to be ready
       echo "Waiting for SQL instance to be ready..."
@@ -121,10 +124,13 @@ resource "null_resource" "enable_psc" {
         # Check if our consumer projects are already in the list
         ALL_CONSUMERS_SET=true
         for consumer in ${join(" ", var.allowed_consumer_project_ids)}; do
+          echo "Checking if consumer project '$consumer' is in allowed list..."
           if [[ "$CURRENT_CONSUMERS" != *"$consumer"* ]]; then
             echo "Consumer project $consumer not found in allowed list, updating..."
             ALL_CONSUMERS_SET=false
             break
+          else
+            echo "Consumer project $consumer is already allowed"
           fi
         done
         
@@ -150,6 +156,7 @@ resource "null_resource" "enable_psc" {
       echo "Enabling Private Service Connect and setting consumer projects..."
       CONSUMER_PROJECTS_CSV="${join(",", var.allowed_consumer_project_ids)}"
       echo "Setting PSC enabled=true and allowed projects to: $CONSUMER_PROJECTS_CSV"
+      echo "GCLOUD COMMAND FORMAT: gcloud sql instances patch ${google_sql_database_instance.producer_sql.name} --project=${var.project_id} --enable-private-service-connect --allowed-psc-projects=$CONSUMER_PROJECTS_CSV --quiet"
       
       # Try the combined command first
       if gcloud sql instances patch ${google_sql_database_instance.producer_sql.name} \
@@ -184,6 +191,7 @@ resource "null_resource" "enable_psc" {
         
         # Then set consumer projects
         echo "Setting allowed PSC projects..."
+        echo "GCLOUD COMMAND FORMAT (separate): gcloud sql instances patch ${google_sql_database_instance.producer_sql.name} --project=${var.project_id} --allowed-psc-projects=$CONSUMER_PROJECTS_CSV --quiet"
         if ! gcloud sql instances patch ${google_sql_database_instance.producer_sql.name} \
           --project=${var.project_id} \
           --allowed-psc-projects=$CONSUMER_PROJECTS_CSV \
@@ -200,6 +208,23 @@ resource "null_resource" "enable_psc" {
         --project=${var.project_id} \
         --format="value(settings.ipConfiguration.pscConfig.allowedConsumerProjects)" 2>/dev/null || echo "")
       echo "Final allowed consumers: $FINAL_CONSUMERS"
+      
+      # Verify all expected consumer projects are in the final list
+      ALL_PROJECTS_VERIFIED=true
+      for consumer in ${join(" ", var.allowed_consumer_project_ids)}; do
+        echo "Verifying consumer project '$consumer' is in final allowed list..."
+        if [[ "$FINAL_CONSUMERS" != *"$consumer"* ]]; then
+          echo "ERROR: Consumer project $consumer not found in final allowed list"
+          ALL_PROJECTS_VERIFIED=false
+        else
+          echo "Consumer project $consumer verified in final allowed list"
+        fi
+      done
+      
+      if [ "$ALL_PROJECTS_VERIFIED" = "false" ]; then
+        echo "ERROR: Not all consumer projects were properly set"
+        exit 1
+      fi
       
       if [ -z "$FINAL_CONSUMERS" ]; then
         echo "ERROR: Consumer projects verification failed - no projects found"

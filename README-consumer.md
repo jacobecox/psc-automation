@@ -8,10 +8,8 @@ Before using this automation, ensure that the service account `central-service-a
 
 ### Required Permissions
 
-The service account needs the following roles on the target project:
-- `roles/editor` - For general resource management
-- `roles/serviceusage.serviceUsageAdmin` - For API enablement
-- `roles/resourcemanager.projectIamAdmin` - For IAM management
+The service account only needs the **Editor** role on the consumer project:
+- `roles/editor` - For general resource management (VPC, subnets, firewall rules, NAT, PSC endpoint)
 
 ### Granting Permissions
 
@@ -28,21 +26,6 @@ chmod +x grant-permissions.sh
 gcloud projects add-iam-policy-binding your-project-id \
   --member="serviceAccount:central-service-account@admin-project-463522.iam.gserviceaccount.com" \
   --role="roles/editor"
-```
-
-**Option 3: Grant all required roles**
-```bash
-gcloud projects add-iam-policy-binding your-project-id \
-  --member="serviceAccount:central-service-account@admin-project-463522.iam.gserviceaccount.com" \
-  --role="roles/editor"
-
-gcloud projects add-iam-policy-binding your-project-id \
-  --member="serviceAccount:central-service-account@admin-project-463522.iam.gserviceaccount.com" \
-  --role="roles/serviceusage.serviceUsageAdmin"
-
-gcloud projects add-iam-policy-binding your-project-id \
-  --member="serviceAccount:central-service-account@admin-project-463522.iam.gserviceaccount.com" \
-  --role="roles/resourcemanager.projectIamAdmin"
 ```
 
 ### Error Handling
@@ -73,6 +56,11 @@ The consumer route automatically:
    - Connects to the producer's service attachment
    - Enables secure communication between consumer and producer
 
+5. **Automatically Creates VM**:
+   - Creates a VM instance in the consumer VPC after successful deployment
+   - Uses e2-micro machine type with Debian 12
+   - Places VM in the vm-subnet for internet access
+
 ## API Endpoints
 
 ### Deploy Consumer Infrastructure
@@ -82,9 +70,10 @@ The consumer route automatically:
 **Request Body:**
 ```json
 {
-  "consumer_project_id": "consumer-test-project-463821",  // required
-  "region": "us-central1",  // optional, defaults to us-central1
-  "service_attachment_uri": "projects/producer-test-project/regions/us-central1/serviceAttachments/producer-sa"  // required
+  "project_id": "consumer-test-project-463821",  // required
+  "region": "us-central1",  // required
+  "service_attachment_uri": "projects/producer-test-project/regions/us-central1/serviceAttachments/producer-sa",  // required
+  "reserved_ip_name": "psc-ip"  // optional, defaults to "psc-ip"
 }
 ```
 
@@ -105,6 +94,50 @@ The consumer route automatically:
   "service_attachment_uri": "projects/producer-test-project/regions/us-central1/serviceAttachments/producer-sa",
   "terraform_output": {
     // Full Terraform output object
+  },
+  "vm_info": {
+    // VM creation details (if successful)
+  }
+}
+```
+
+### Create VM Instance (Standalone)
+
+**POST** `/api/create-vm/deploy/create-vm`
+
+**Request Body:**
+```json
+{
+  "project_id": "consumer-project-463821",  // required
+  "region": "us-central1",  // required
+  "instance_name": "consumer-vm",  // optional, defaults to "consumer-vm"
+  "machine_type": "e2-micro",  // optional, defaults to "e2-micro"
+  "os_image": "debian-cloud/debian-12"  // optional, defaults to "debian-cloud/debian-12"
+}
+```
+
+**VM Configuration Parameters:**
+
+- **instance_name**: Name for the VM instance (e.g., "app-server", "web-server", "consumer-vm")
+- **machine_type**: GCP machine type (e.g., "e2-micro", "e2-small", "e2-medium", "n1-standard-1")
+- **os_image**: Operating system image (e.g., "debian-cloud/debian-12", "ubuntu-os-cloud/ubuntu-2204-lts", "centos-cloud/centos-7")
+
+**Response:**
+```json
+{
+  "message": "VM created successfully in consumer VPC",
+  "project_id": "consumer-project-463821",
+  "region": "us-central1",
+  "instance_name": "consumer-vm",
+  "instance_id": "consumer-vm-123456",
+  "zone": "us-central1-a",
+  "internal_ip": "10.1.0.10",
+  "subnet_name": "vm-subnet",
+  "vpc_name": "consumer-vpc",
+  "machine_type": "e2-micro",
+  "os_image": "debian-cloud/debian-12",
+  "terraform_output": {
+    // Full Terraform output object
   }
 }
 ```
@@ -116,6 +149,12 @@ The Terraform configuration is located in `terraform/consumer/` and includes:
 - **api-enablement.tf**: API enablement configuration
 - **infrastructure.tf**: Main infrastructure configuration
 - **variables.tf**: Input variables definition
+
+### Required Variables
+
+- `project_id` (required) - GCP project ID for consumer
+- `region` (required) - GCP region (e.g., "us-central1")
+- `service_attachment_uri` (required) - Producer's service attachment URI
 
 ### Resources Created
 
@@ -147,11 +186,87 @@ Test the consumer deployment:
 curl -X POST http://localhost:3000/api/consumer/deploy/consumer \
   -H "Content-Type: application/json" \
   -d '{
-    "consumer_project_id": "consumer-test-project-463821",
+    "project_id": "consumer-test-project-463821",
     "region": "us-central1",
     "service_attachment_uri": "projects/producer-test-project/regions/us-central1/serviceAttachments/producer-sa"
   }'
 ```
+
+Test VM creation:
+
+```bash
+curl -X POST http://localhost:3000/api/create-vm/deploy/create-vm \
+  -H "Content-Type: application/json" \
+  -d '{
+    "project_id": "consumer-project-463821",
+    "region": "us-central1",
+    "instance_name": "app-server",
+    "machine_type": "e2-small",
+    "os_image": "ubuntu-os-cloud/ubuntu-2204-lts"
+  }'
+```
+
+## Usage Examples
+
+### Basic Consumer Deployment
+```bash
+# Deploy consumer infrastructure with required parameters
+curl -X POST http://localhost:3000/api/consumer/deploy/consumer \
+  -H "Content-Type: application/json" \
+  -d '{
+    "project_id": "consumer-project-463821",
+    "region": "us-central1",
+    "service_attachment_uri": "projects/producer-project/regions/us-central1/serviceAttachments/producer-sql-psc"
+  }'
+```
+
+### Custom VM Configuration
+```bash
+# Create VM with custom settings
+curl -X POST http://localhost:3000/api/create-vm/deploy/create-vm \
+  -H "Content-Type: application/json" \
+  -d '{
+    "project_id": "consumer-project-463821",
+    "region": "us-central1",
+    "instance_name": "web-server",
+    "machine_type": "e2-medium",
+    "os_image": "ubuntu-os-cloud/ubuntu-2204-lts"
+  }'
+```
+
+### Production-Ready VM
+```bash
+# Production-ready VM instance
+curl -X POST http://localhost:3000/api/create-vm/deploy/create-vm \
+  -H "Content-Type: application/json" \
+  -d '{
+    "project_id": "consumer-project-463821",
+    "region": "us-central1",
+    "instance_name": "app-server",
+    "machine_type": "n1-standard-1",
+    "os_image": "debian-cloud/debian-12"
+  }'
+```
+
+## Available Machine Types
+
+- **e2-micro**: 2 vCPUs, 1 GB RAM (free tier)
+- **e2-small**: 2 vCPUs, 2 GB RAM
+- **e2-medium**: 2 vCPUs, 4 GB RAM
+- **e2-standard-2**: 2 vCPUs, 8 GB RAM
+- **e2-standard-4**: 4 vCPUs, 16 GB RAM
+- **n1-standard-1**: 1 vCPU, 3.75 GB RAM
+- **n1-standard-2**: 2 vCPUs, 7.5 GB RAM
+- **n1-standard-4**: 4 vCPUs, 15 GB RAM
+
+## Available OS Images
+
+- **debian-cloud/debian-12**: Debian 12 (latest)
+- **ubuntu-os-cloud/ubuntu-2204-lts**: Ubuntu 22.04 LTS
+- **ubuntu-os-cloud/ubuntu-2004-lts**: Ubuntu 20.04 LTS
+- **centos-cloud/centos-7**: CentOS 7
+- **centos-cloud/centos-stream-8**: CentOS Stream 8
+- **rhel-cloud/rhel-8**: Red Hat Enterprise Linux 8
 
 ## Error Handling
 
@@ -176,4 +291,18 @@ The consumer infrastructure creates a dual-subnet architecture:
    - No NAT access (isolated from internet)
    - Direct connection to the producer's service attachment
 
-This architecture provides security by isolating the PSC endpoint while allowing VMs to access both the internet and the producer's services. 
+This architecture provides security by isolating the PSC endpoint while allowing VMs to access both the internet and the producer's services.
+
+## State Management
+
+The consumer module uses Terraform workspaces for state isolation:
+- Workspace name is derived from the project ID
+- Ensures clean state separation between different projects
+- Prevents conflicts when managing multiple consumer projects
+
+## Timeouts and Performance
+
+- **Deployment Timeout**: 30 minutes for the entire consumer deployment
+- **API Propagation**: 60 seconds wait after API enablement
+- **VM Creation**: Automatic VM creation after infrastructure deployment
+- **PSC Setup**: Immediate PSC endpoint creation once infrastructure is ready 

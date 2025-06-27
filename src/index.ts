@@ -3,7 +3,6 @@ import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import producerRoutes from './routes/producer.js';
 import consumerRoutes from './routes/consumer.js';
 import producerManagedRoutes from './routes/producerManaged.js';
 import createSqlRoutes from './routes/createSql.js';
@@ -47,7 +46,6 @@ const port = process.env.PORT || 3000;
 app.use(express.json());
 
 // Routes
-app.use('/api/producer', producerRoutes);
 app.use('/api/consumer', consumerRoutes);
 app.use('/api/producer-managed', producerManagedRoutes);
 app.use('/api/create-sql', createSqlRoutes);

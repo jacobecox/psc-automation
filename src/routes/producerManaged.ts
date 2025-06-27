@@ -10,10 +10,11 @@ router.use(express.json());
 interface ProducerManagedRequest {
   project_id: string;
   region?: string;
+  psc_ip_range_name?: string;
   // SQL configuration parameters
   instance_id?: string;
   default_password?: string;
-  allowed_consumer_project_id?: string;
+  allowed_consumer_project_ids?: string[];
   tier?: string;
   database_version?: string;
   deletion_protection?: boolean;
@@ -61,7 +62,20 @@ router.post('/deploy/managed', async (req: Request, res: Response): Promise<void
   try {
     const { 
       project_id = "test-project-2-462619", 
-      region = "us-central1"
+      region = "us-central1",
+      psc_ip_range_name = "psc-ip-range",
+      // SQL configuration parameters
+      instance_id = "producer-sql",
+      default_password = "postgres",
+      allowed_consumer_project_ids,
+      tier = "db-f1-micro",
+      database_version = "POSTGRES_17",
+      deletion_protection = false,
+      backup_enabled = true,
+      backup_start_time = "02:00",
+      maintenance_day = 7,
+      maintenance_hour = 2,
+      maintenance_update_track = "stable"
     } = req.body as ProducerManagedRequest;
 
     // Validate the project ID
@@ -84,11 +98,44 @@ router.post('/deploy/managed', async (req: Request, res: Response): Promise<void
       return;
     }
 
+    // Validate the PSC IP range name
+    if (psc_ip_range_name && typeof psc_ip_range_name !== 'string') {
+      clearTimeout(timeout);
+      res.status(400).json({ 
+        error: 'Invalid psc_ip_range_name. Must be a string.',
+        details: 'Please provide a valid name for the PSC IP range'
+      });
+      return;
+    }
+
+    // Validate the allowed consumer project IDs (required)
+    if (!allowed_consumer_project_ids || !Array.isArray(allowed_consumer_project_ids) || allowed_consumer_project_ids.length === 0) {
+      clearTimeout(timeout);
+      res.status(400).json({ 
+        error: 'Invalid allowed_consumer_project_ids. Must be a non-empty array of strings.',
+        details: 'Please provide valid GCP consumer project IDs for PSC access. This field is required.'
+      });
+      return;
+    }
+
+    // Validate each project ID
+    for (const consumerProjectId of allowed_consumer_project_ids) {
+      if (typeof consumerProjectId !== 'string' || consumerProjectId.trim() === '') {
+        clearTimeout(timeout);
+        res.status(400).json({ 
+          error: 'Invalid project ID in allowed_consumer_project_ids array.',
+          details: `Invalid project ID: ${consumerProjectId}`
+        });
+        return;
+      }
+    }
+
     console.log(`Starting managed producer deployment for project: ${project_id} in region: ${region}`);
 
     // Set environment variables for Terraform
     process.env.TF_VAR_project_id = project_id;
     process.env.TF_VAR_region = region;
+    process.env.TF_VAR_psc_ip_range_name = psc_ip_range_name;
 
     try {
       // Get the Terraform directory path
@@ -124,9 +171,9 @@ router.post('/deploy/managed', async (req: Request, res: Response): Promise<void
         const sqlVariables = {
           project_id: project_id,
           region: region,
-          instance_id: "producer-sql",
-          default_password: "postgres",
-          allowed_consumer_project_ids: ["consumer-test-project-463821"]
+          instance_id: instance_id,
+          default_password: default_password,
+          allowed_consumer_project_ids: allowed_consumer_project_ids
         };
 
         // Run SQL creation using the same logic as createSql route
@@ -158,7 +205,7 @@ router.post('/deploy/managed', async (req: Request, res: Response): Promise<void
           private_ip_address: sqlOutputs.private_ip_address || '',
           database_name: sqlOutputs.database_name || 'postgres',
           user_name: sqlOutputs.user_name || 'postgres',
-          allowed_consumer_project_id: sqlOutputs.allowed_consumer_project_id || 'consumer-test-project-463821',
+          allowed_consumer_project_ids: sqlOutputs.allowed_consumer_project_ids || ['consumer-test-project-463821'],
           service_attachment_uri: sqlOutputs.service_attachment_uri || '',
           terraform_output: sqlOutputs,
           psc_enabled: pscCompleted

@@ -9,7 +9,7 @@ terraform {
 }
 
 provider "google" {
-  project = var.consumer_project_id
+  project = var.project_id
   region  = var.region
 }
 
@@ -27,7 +27,7 @@ resource "google_compute_instance" "consumer_vm" {
   }
 
   network_interface {
-    subnetwork = "projects/${var.consumer_project_id}/regions/${var.region}/subnetworks/vm-subnet"
+    subnetwork = "projects/${var.project_id}/regions/${var.region}/subnetworks/vm-subnet"
     
     # No external IP - VM will use Cloud NAT for internet access
   }
@@ -91,9 +91,9 @@ output "vpc_name" {
   value       = "consumer-vpc"
 }
 
-output "consumer_project_id" {
-  description = "The consumer project ID"
-  value       = var.consumer_project_id
+output "project_id" {
+  description = "The project ID"
+  value       = var.project_id
 }
 
 output "region" {

@@ -6,7 +6,6 @@ variable "project_id" {
 variable "region" {
   description = "The GCP region for the SQL instance"
   type        = string
-  default     = "us-central1"
 }
 
 variable "instance_id" {

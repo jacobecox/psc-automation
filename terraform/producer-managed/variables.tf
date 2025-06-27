@@ -1,11 +1,15 @@
 variable "project_id" {
   description = "The GCP project ID for the producer"
   type        = string
-  default     = "test-project-2-462619"
 }
  
 variable "region" {
   description = "The region where resources will be created"
   type        = string
-  default     = "us-central1"
+}
+
+variable "psc_ip_range_name" {
+  description = "The name for the PSA IP range (defaults to psc-ip-range)"
+  type        = string
+  default     = "psc-ip-range"
 } 

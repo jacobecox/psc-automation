@@ -8,10 +8,10 @@ Before using this automation, ensure that the service account `central-service-a
 
 ### Required Permissions
 
-The service account needs the following roles on the target project:
+The service account needs these roles on the producer project:
 - `roles/editor` - For general resource management
-- `roles/serviceusage.serviceUsageAdmin` - For API enablement
-- `roles/resourcemanager.projectIamAdmin` - For IAM management
+- `roles/servicenetworking.admin` - For VPC peering operations
+- `roles/compute.networkAdmin` - For networking operations
 
 ### Granting Permissions
 
@@ -23,26 +23,21 @@ chmod +x grant-permissions.sh
 ./grant-permissions.sh your-project-id
 ```
 
-**Option 2: Manual gcloud command**
+**Option 2: Manual gcloud commands**
 ```bash
-gcloud projects add-iam-policy-binding your-project-id \
-  --member="serviceAccount:central-service-account@admin-project-463522.iam.gserviceaccount.com" \
-  --role="roles/editor"
-```
-
-**Option 3: Grant all required roles**
-```bash
+# Basic permissions
 gcloud projects add-iam-policy-binding your-project-id \
   --member="serviceAccount:central-service-account@admin-project-463522.iam.gserviceaccount.com" \
   --role="roles/editor"
 
+# Networking permissions for VPC peering and PSC
 gcloud projects add-iam-policy-binding your-project-id \
   --member="serviceAccount:central-service-account@admin-project-463522.iam.gserviceaccount.com" \
-  --role="roles/serviceusage.serviceUsageAdmin"
+  --role="roles/servicenetworking.admin"
 
 gcloud projects add-iam-policy-binding your-project-id \
   --member="serviceAccount:central-service-account@admin-project-463522.iam.gserviceaccount.com" \
-  --role="roles/resourcemanager.projectIamAdmin"
+  --role="roles/compute.networkAdmin"
 ```
 
 ### Error Handling
@@ -78,13 +73,14 @@ The managed producer route automatically:
 
 ### Deploy Managed Producer Infrastructure
 
-**POST** `/producerManaged/deploy/managed`
+**POST** `/api/producer-managed/deploy/managed`
 
 **Request Body:**
 ```json
 {
-  "producer_project_id": "producer-project-463519",  // optional, defaults to "test-project-2-462619"
-  "region": "us-central1"  // optional, defaults to us-central1
+  "project_id": "producer-project-463519",  // required
+  "region": "us-central1",  // required
+  "allowed_consumer_project_ids": ["consumer-project-463821"]  // required
 }
 ```
 
@@ -108,7 +104,7 @@ The managed producer route automatically:
     "private_ip_address": "10.0.0.100",
     "database_name": "postgres",
     "user_name": "postgres",
-    "allowed_consumer_project_id": "consumer-test-project-463821",
+    "allowed_consumer_project_ids": ["consumer-project-463821"],
     "service_attachment_uri": "projects/producer-project-463519/regions/us-central1/serviceAttachments/producer-sql-psc",
     "terraform_output": {
       // Full Terraform output object
@@ -123,16 +119,16 @@ The managed producer route automatically:
 
 ### Create SQL Instance (Standalone)
 
-**POST** `/createSql/deploy/create-sql`
+**POST** `/api/create-sql/deploy/create-sql`
 
 **Request Body:**
 ```json
 {
-  "producer_project_id": "producer-project-463519",  // optional, defaults to "producer-test-project"
-  "region": "us-central1",  // optional, defaults to us-central1
-  "instance_id": "producer-sql",  // optional, defaults to "producer-sql"
+  "project_id": "producer-project-463519",  // required
+  "region": "us-central1",  // required
+  "instance_name": "producer-sql",  // optional, defaults to "producer-sql"
   "default_password": "postgres",  // optional, defaults to "postgres"
-  "allowed_consumer_project_id": "consumer-test-project-463821",  // optional, defaults to "consumer-test-project-463821"
+  "allowed_consumer_project_ids": ["consumer-project-463821"],  // required
   "tier": "db-f1-micro",  // optional, defaults to "db-f1-micro"
   "database_version": "POSTGRES_17",  // optional, defaults to "POSTGRES_17"
   "deletion_protection": false,  // optional, defaults to false
@@ -161,12 +157,12 @@ The managed producer route automatically:
   "message": "SQL infrastructure deployed successfully with PSC enabled",
   "project_id": "producer-project-463519",
   "region": "us-central1",
-  "instance_id": "producer-sql",
+  "instance_name": "producer-sql",
   "instance_connection_name": "producer-project-463519:us-central1:producer-sql",
   "private_ip_address": "10.0.0.100",
   "database_name": "postgres",
   "user_name": "postgres",
-  "allowed_consumer_project_id": "consumer-test-project-463821",
+  "allowed_consumer_project_ids": ["consumer-project-463821"],
   "service_attachment_uri": "projects/producer-project-463519/regions/us-central1/serviceAttachments/producer-sql-psc",
   "terraform_output": {
     // Full Terraform output object
@@ -177,7 +173,7 @@ The managed producer route automatically:
 
 ### Get Managed Producer Status
 
-**GET** `/producerManaged/status/managed?producer_project_id=your-gcp-project-id`
+**GET** `/api/producer-managed/status/managed?project_id=your-gcp-project-id`
 
 **Response:**
 ```json
@@ -198,7 +194,7 @@ The managed producer route automatically:
 
 ### Get SQL Instance Status
 
-**GET** `/createSql/status/create-sql?producer_project_id=your-gcp-project-id`
+**GET** `/api/create-sql/status/create-sql?project_id=your-gcp-project-id`
 
 **Response:**
 ```json
@@ -206,12 +202,12 @@ The managed producer route automatically:
   "message": "SQL infrastructure status retrieved successfully",
   "project_id": "your-gcp-project-id",
   "region": "us-central1",
-  "instance_id": "producer-sql",
+  "instance_name": "producer-sql",
   "instance_connection_name": "producer-project-463519:us-central1:producer-sql",
   "private_ip_address": "10.0.0.100",
   "database_name": "postgres",
   "user_name": "postgres",
-  "allowed_consumer_project_id": "consumer-test-project-463821",
+  "allowed_consumer_project_ids": ["consumer-project-463821"],
   "service_attachment_uri": "projects/producer-project-463519/regions/us-central1/serviceAttachments/producer-sql-psc",
   "terraform_output": {
     // Full Terraform output object
@@ -223,8 +219,15 @@ The managed producer route automatically:
 
 The Terraform configuration is located in `terraform/producer-managed/` and includes:
 
-- **main.tf**: Main infrastructure configuration
+- **api-enablement.tf**: API enablement configuration
+- **infrastructure.tf**: Main infrastructure configuration
 - **variables.tf**: Input variables definition
+
+### Required Variables
+
+- `project_id` (required) - GCP project ID for producer
+- `region` (required) - GCP region (e.g., "us-central1")
+- `allowed_consumer_project_ids` (required) - Array of consumer project IDs
 
 ### Resources Created
 
@@ -251,25 +254,27 @@ The Terraform configuration is located in `terraform/producer-managed/` and incl
 
 ## Usage Examples
 
-### Basic Deployment (Uses Defaults)
+### Basic Deployment (Required Parameters)
 ```bash
-# Deploy with default settings
-curl -X POST http://localhost:3000/producerManaged/deploy/managed \
+# Deploy with required parameters
+curl -X POST http://localhost:3000/api/producer-managed/deploy/managed \
   -H "Content-Type: application/json" \
   -d '{
-    "producer_project_id": "producer-project-463519",
-    "region": "us-central1"
+    "project_id": "producer-project-463519",
+    "region": "us-central1",
+    "allowed_consumer_project_ids": ["consumer-project-463821"]
   }'
 ```
 
 ### Custom SQL Configuration
 ```bash
 # Deploy with custom SQL settings
-curl -X POST http://localhost:3000/createSql/deploy/create-sql \
+curl -X POST http://localhost:3000/api/create-sql/deploy/create-sql \
   -H "Content-Type: application/json" \
   -d '{
-    "producer_project_id": "producer-project-463519",
+    "project_id": "producer-project-463519",
     "region": "us-central1",
+    "allowed_consumer_project_ids": ["consumer-project-463821"],
     "tier": "db-n1-standard-1",
     "database_version": "POSTGRES_16",
     "deletion_protection": true,
@@ -284,11 +289,12 @@ curl -X POST http://localhost:3000/createSql/deploy/create-sql \
 ### Production-Ready Configuration
 ```bash
 # Production-ready SQL instance
-curl -X POST http://localhost:3000/createSql/deploy/create-sql \
+curl -X POST http://localhost:3000/api/create-sql/deploy/create-sql \
   -H "Content-Type: application/json" \
   -d '{
-    "producer_project_id": "producer-project-463519",
+    "project_id": "producer-project-463519",
     "region": "us-central1",
+    "allowed_consumer_project_ids": ["consumer-project-463821"],
     "tier": "db-n1-standard-2",
     "database_version": "POSTGRES_17",
     "deletion_protection": true,
@@ -320,18 +326,35 @@ curl -X POST http://localhost:3000/createSql/deploy/create-sql \
 - **POSTGRES_13**: PostgreSQL 13
 - **POSTGRES_12**: PostgreSQL 12
 
-## Project ID Behavior
+## Required Parameters
 
-The `producer_project_id` parameter is **optional** in the request body:
+The following parameters are **required** and have no defaults:
 
-- **If omitted**: Uses the default project ID `"producer-project-463519"`
-- **If provided**: Uses the specified project ID
-- **If empty/null**: Returns a validation error
+- `project_id` - Must be provided in all requests
+- `region` - Must be provided in all requests
+- `allowed_consumer_project_ids` - Must be provided as an array of project IDs
 
-This allows for flexible usage while providing sensible defaults for common scenarios.
+This ensures explicit configuration and prevents accidental deployments to wrong projects.
 
-## Testing
+## State Management
 
-Use the provided test script:
+The producer-managed module uses Terraform workspaces for state isolation:
+- Workspace name is derived from the project ID
+- Ensures clean state separation between different projects
+- Prevents conflicts when managing multiple producer projects
 
-```
+## Timeouts and Performance
+
+- **Deployment Timeout**: 45 minutes for SQL operations, 15 minutes for others
+- **API Propagation**: 60 seconds wait after API enablement
+- **PSC Polling**: 30 seconds intervals for PSC completion monitoring
+- **SQL Creation**: Extended timeout for SQL instance provisioning
+
+## Error Handling
+
+The system provides detailed error messages for:
+- Permission issues with clear resolution steps
+- Invalid parameters with validation details
+- Terraform execution failures
+- API enablement issues
+- PSC enablement timeouts

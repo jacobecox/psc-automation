@@ -54,7 +54,7 @@ router.post('/deploy/create-sql', async (req: Request, res: Response): Promise<v
       });
       res.end();
     }
-  }, 35 * 60 * 1000); // 35 minutes timeout (30 min PSC polling + buffer)
+  }, 60 * 60 * 1000); // 60 minutes timeout (1 hour)
 
   try {
     console.log('🟢 CHECKPOINT 2: Extracting request parameters');
@@ -63,7 +63,7 @@ router.post('/deploy/create-sql', async (req: Request, res: Response): Promise<v
       region = "us-central1",
       instance_id = "producer-sql",
       default_password = "postgres",
-      allowed_consumer_project_ids = ["consumer-test-project-463821"],
+      allowed_consumer_project_ids,
       tier = "db-f1-micro",
       database_version = "POSTGRES_17",
       deletion_protection = false,
@@ -114,7 +114,7 @@ router.post('/deploy/create-sql', async (req: Request, res: Response): Promise<v
       clearTimeout(timeout);
       res.status(400).json({ 
         error: 'Invalid allowed_consumer_project_ids. Must be a non-empty array of strings.',
-        details: 'Please provide valid GCP consumer project IDs for PSC access'
+        details: 'Please provide valid GCP consumer project IDs for PSC access. This field is required.'
       });
       return;
     }

@@ -68,7 +68,7 @@ resource "google_compute_firewall" "default_allow_ssh" {
 
 # Allocate IP range for Private Service Access
 resource "google_compute_global_address" "psc_ip_range" {
-  name          = "psc-ip-range"
+  name          = var.psc_ip_range_name
   purpose       = "VPC_PEERING"
   address_type  = "INTERNAL"
   prefix_length = 16

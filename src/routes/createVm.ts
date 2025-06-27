@@ -7,7 +7,7 @@ const router: Router = express.Router();
 router.use(express.json());
 
 interface CreateVmRequest {
-  consumer_project_id: string;
+  project_id: string;
   region?: string;
   instance_name?: string;
   machine_type?: string;
@@ -16,7 +16,7 @@ interface CreateVmRequest {
 
 interface CreateVmResponse {
   message: string;
-  consumer_project_id: string;
+  project_id: string;
   region: string;
   instance_name: string;
   instance_id: string;
@@ -53,7 +53,7 @@ router.post('/deploy/create-vm', async (req: Request, res: Response): Promise<vo
   try {
     console.log('🟢 CHECKPOINT 2: Extracting request parameters');
     const { 
-      consumer_project_id,
+      project_id,
       region = "us-central1",
       instance_name = "consumer-vm",
       machine_type = "e2-micro",
@@ -61,13 +61,13 @@ router.post('/deploy/create-vm', async (req: Request, res: Response): Promise<vo
     } = req.body as CreateVmRequest;
 
     console.log('🟢 CHECKPOINT 3: Validating request parameters');
-    // Validate the consumer project ID (required)
-    if (!consumer_project_id || typeof consumer_project_id !== 'string') {
-      console.log('🔴 CHECKPOINT ERROR: Invalid or missing consumer_project_id');
+    // Validate the project ID (required)
+    if (!project_id || typeof project_id !== 'string') {
+      console.log('🔴 CHECKPOINT ERROR: Invalid or missing project_id');
       clearTimeout(timeout);
       res.status(400).json({ 
-        error: 'Invalid consumer_project_id. Must be a non-empty string.',
-        details: 'Please provide a valid GCP consumer project ID'
+        error: 'Invalid project_id. Must be a non-empty string.',
+        details: 'Please provide a valid GCP project ID'
       });
       return;
     }
@@ -117,11 +117,11 @@ router.post('/deploy/create-vm', async (req: Request, res: Response): Promise<vo
     }
 
     console.log('🟢 CHECKPOINT 4: Parameters validated successfully');
-    console.log(`Starting VM creation for consumer project: ${consumer_project_id} in region: ${region}`);
+    console.log(`Starting VM creation for project: ${project_id} in region: ${region}`);
     console.log(`Instance: ${instance_name}, Machine Type: ${machine_type}, OS: ${os_image}`);
 
     // Set environment variables for Terraform
-    process.env.TF_VAR_consumer_project_id = consumer_project_id;
+    process.env.TF_VAR_project_id = project_id;
     process.env.TF_VAR_region = region;
     process.env.TF_VAR_instance_name = instance_name;
     process.env.TF_VAR_machine_type = machine_type;
@@ -145,7 +145,7 @@ router.post('/deploy/create-vm', async (req: Request, res: Response): Promise<vo
       // Prepare response
       const response: CreateVmResponse = {
         message: 'VM created successfully in consumer VPC',
-        consumer_project_id: terraformResult.consumer_project_id || consumer_project_id,
+        project_id: terraformResult.project_id || project_id,
         region: terraformResult.region || region,
         instance_name: terraformResult.instance_name || instance_name,
         instance_id: terraformResult.instance_id || '',
@@ -225,7 +225,7 @@ router.post('/deploy/create-vm', async (req: Request, res: Response): Promise<vo
       
       const errorResponse: CreateVmResponse = {
         message: 'VM creation failed',
-        consumer_project_id: consumer_project_id,
+        project_id: project_id,
         region: region,
         instance_name: instance_name,
         instance_id: '',
@@ -261,17 +261,17 @@ router.post('/deploy/create-vm', async (req: Request, res: Response): Promise<vo
 // Status endpoint to check VM status
 router.get('/status/create-vm', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { consumer_project_id } = req.query;
+    const { project_id } = req.query;
 
-    if (!consumer_project_id || typeof consumer_project_id !== 'string') {
+    if (!project_id || typeof project_id !== 'string') {
       res.status(400).json({ 
-        error: 'Invalid consumer_project_id query parameter. Must be a non-empty string.',
-        details: 'Please provide a valid GCP consumer project ID'
+        error: 'Invalid project_id query parameter. Must be a non-empty string.',
+        details: 'Please provide a valid GCP project ID'
       });
       return;
     }
 
-    console.log(`Checking VM status for consumer project: ${consumer_project_id}`);
+    console.log(`Checking VM status for project: ${project_id}`);
 
     // Get the Terraform directory path
     const __filename = fileURLToPath(import.meta.url);
@@ -284,7 +284,7 @@ router.get('/status/create-vm', async (req: Request, res: Response): Promise<voi
       if (outputs && outputs.success) {
         const response: CreateVmResponse = {
           message: 'VM status retrieved successfully',
-          consumer_project_id: outputs.consumer_project_id || consumer_project_id,
+          project_id: outputs.project_id || project_id,
           region: outputs.region || 'us-central1',
           instance_name: outputs.instance_name || 'consumer-vm',
           instance_id: outputs.instance_id || '',
@@ -301,7 +301,7 @@ router.get('/status/create-vm', async (req: Request, res: Response): Promise<voi
       } else {
         res.status(404).json({ 
           error: 'VM not found or not deployed',
-          consumer_project_id: consumer_project_id,
+          project_id: project_id,
           details: 'No VM infrastructure found for this project'
         });
       }
@@ -309,7 +309,7 @@ router.get('/status/create-vm', async (req: Request, res: Response): Promise<voi
       console.error('Error getting Terraform output:', terraformError);
       res.status(404).json({ 
         error: 'VM not found or not deployed',
-        consumer_project_id: consumer_project_id,
+        project_id: project_id,
         details: terraformError instanceof Error ? terraformError.message : 'Unknown error'
       });
     }

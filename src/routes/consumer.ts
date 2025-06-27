@@ -8,14 +8,15 @@ const router: Router = express.Router();
 router.use(express.json());
 
 interface ConsumerRequest {
-  consumer_project_id: string;
+  project_id: string;
   region?: string;
   service_attachment_uri: string;
+  reserved_ip_name?: string;
 }
 
 interface ConsumerResponse {
   message: string;
-  consumer_project_id: string;
+  project_id: string;
   region: string;
   vpc_name: string;
   vm_subnet_name: string;
@@ -55,18 +56,19 @@ router.post('/deploy/consumer', async (req: Request, res: Response): Promise<voi
   try {
     console.log('🟢 CHECKPOINT 2: Extracting request parameters');
     const { 
-      consumer_project_id,
+      project_id,
       region = "us-central1",
-      service_attachment_uri
+      service_attachment_uri,
+      reserved_ip_name = "psc-ip"
     } = req.body as ConsumerRequest;
 
     console.log('🟢 CHECKPOINT 3: Validating request parameters');
     // Validate the project ID (required)
-    if (!consumer_project_id || typeof consumer_project_id !== 'string') {
-      console.log('🔴 CHECKPOINT ERROR: Invalid or missing consumer_project_id');
+    if (!project_id || typeof project_id !== 'string') {
+      console.log('🔴 CHECKPOINT ERROR: Invalid or missing project_id');
       clearTimeout(timeout);
       res.status(400).json({ 
-        error: 'Invalid consumer_project_id. Must be a non-empty string.',
+        error: 'Invalid project_id. Must be a non-empty string.',
         details: 'Please provide a valid GCP project ID'
       });
       return;
@@ -95,13 +97,14 @@ router.post('/deploy/consumer', async (req: Request, res: Response): Promise<voi
     }
 
     console.log('🟢 CHECKPOINT 4: Parameters validated successfully');
-    console.log(`Starting consumer deployment for project: ${consumer_project_id} in region: ${region}`);
+    console.log(`Starting consumer deployment for project: ${project_id} in region: ${region}`);
     console.log(`Service Attachment URI: ${service_attachment_uri}`);
 
     // Set environment variables for Terraform
-    process.env.TF_VAR_project_id = consumer_project_id;
+    process.env.TF_VAR_project_id = project_id;
     process.env.TF_VAR_region = region;
     process.env.TF_VAR_service_attachment_uri = service_attachment_uri;
+    process.env.TF_VAR_reserved_ip_name = reserved_ip_name;
 
     try {
       console.log('🟢 CHECKPOINT 5: Getting Terraform directory path');
@@ -121,7 +124,7 @@ router.post('/deploy/consumer', async (req: Request, res: Response): Promise<voi
       // Prepare response
       const response: ConsumerResponse = {
         message: 'Consumer infrastructure deployed successfully',
-        consumer_project_id: terraformResult.consumer_project_id || consumer_project_id,
+        project_id: terraformResult.project_id || project_id,
         region: region,
         vpc_name: terraformResult.vpc_name || 'consumer-vpc',
         vm_subnet_name: terraformResult.subnet_name || 'vm-subnet',
@@ -190,7 +193,7 @@ router.post('/deploy/consumer', async (req: Request, res: Response): Promise<voi
       try {
         console.log('Calling create-vm route to create VM in consumer VPC...');
         const vmResponse = await axios.post('http://localhost:3000/api/create-vm/deploy/create-vm', {
-          consumer_project_id: consumer_project_id,
+          project_id: project_id,
           region: region,
           instance_name: 'consumer-vm',
           machine_type: 'e2-micro',
@@ -230,7 +233,7 @@ router.post('/deploy/consumer', async (req: Request, res: Response): Promise<voi
       
       const errorResponse: ConsumerResponse = {
         message: 'Consumer deployment failed',
-        consumer_project_id: consumer_project_id,
+        project_id: project_id,
         region: region,
         vpc_name: '',
         vm_subnet_name: '',
@@ -318,11 +321,11 @@ router.post('/deploy/consumer', async (req: Request, res: Response): Promise<voi
 // Add a route to get the current state of the consumer
 router.get('/status/consumer', async (req: Request, res: Response): Promise<void> => {
   try {
-    const { consumer_project_id } = req.query;
+    const { project_id } = req.query;
 
-    if (!consumer_project_id || typeof consumer_project_id !== 'string') {
+    if (!project_id || typeof project_id !== 'string') {
       res.status(400).json({ 
-        error: 'Invalid consumer_project_id query parameter. Must be a non-empty string.',
+        error: 'Invalid project_id query parameter. Must be a non-empty string.',
         details: 'Please provide a valid GCP project ID'
       });
       return;
@@ -333,7 +336,7 @@ router.get('/status/consumer', async (req: Request, res: Response): Promise<void
       
       const response: ConsumerResponse = {
         message: 'Consumer infrastructure status retrieved successfully',
-        consumer_project_id: consumer_project_id as string,
+        project_id: project_id as string,
         region: outputs.region || 'us-central1',
         vpc_name: outputs.vpc_name || 'consumer-vpc',
         vm_subnet_name: outputs.subnet_name || 'vm-subnet',
@@ -353,7 +356,7 @@ router.get('/status/consumer', async (req: Request, res: Response): Promise<void
       console.error('Failed to get Terraform outputs:', terraformError);
       res.status(404).json({ 
         error: 'Consumer infrastructure not found or not deployed',
-        consumer_project_id: consumer_project_id,
+        project_id: project_id,
         details: terraformError instanceof Error ? terraformError.message : 'Unknown error'
       });
     }
