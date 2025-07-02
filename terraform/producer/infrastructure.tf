@@ -13,7 +13,7 @@ resource "google_compute_network" "producer_vpc" {
 # Create subnet
 resource "google_compute_subnetwork" "producer_subnet" {
   name          = "producer-subnet"
-  ip_cidr_range = "10.0.0.0/24"
+  ip_cidr_range = var.subnet_cidr_range
   region        = var.region
   network       = google_compute_network.producer_vpc.id
 
@@ -39,7 +39,7 @@ resource "google_compute_firewall" "default_allow_internal" {
     protocol = "icmp"
   }
   
-  source_ranges = ["10.0.0.0/8"]
+  source_ranges = var.internal_firewall_source_ranges
 
   timeouts {
     create = "10m"
@@ -71,7 +71,7 @@ resource "google_compute_global_address" "psc_ip_range" {
   name          = var.psc_ip_range_name
   purpose       = "VPC_PEERING"
   address_type  = "INTERNAL"
-  prefix_length = 16
+  prefix_length = var.psc_ip_range_prefix_length
   network       = google_compute_network.producer_vpc.id
 
   timeouts {
@@ -86,6 +86,8 @@ resource "google_service_networking_connection" "private_vpc_connection" {
   network                 = google_compute_network.producer_vpc.id
   service                 = "servicenetworking.googleapis.com"
   reserved_peering_ranges = [google_compute_global_address.psc_ip_range.name]
+
+  depends_on = [google_compute_global_address.psc_ip_range]
 
   timeouts {
     create = "10m"

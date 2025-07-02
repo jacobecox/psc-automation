@@ -4,9 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import consumerRoutes from './routes/consumer.js';
-import producerManagedRoutes from './routes/producerManaged.js';
-import createSqlRoutes from './routes/createSql.js';
-import createVmRoutes from './routes/createVm.js';
+import producerRoutes from './routes/producer.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -47,9 +45,7 @@ app.use(express.json());
 
 // Routes
 app.use('/api/consumer', consumerRoutes);
-app.use('/api/producer-managed', producerManagedRoutes);
-app.use('/api/create-sql', createSqlRoutes);
-app.use('/api/create-vm', createVmRoutes);
+app.use('/api/producer', producerRoutes);
 
 app.get('/', (_req, res) => {
   try {

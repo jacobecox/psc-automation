@@ -8,6 +8,18 @@ variable "region" {
   type        = string
 }
 
+variable "consumer_vpc_name" {
+  description = "The name of the consumer VPC"
+  type        = string
+  default     = "consumer-vpc"
+}
+
+variable "vm_subnet_name" {
+  description = "The name of the VM subnet"
+  type        = string
+  default     = "vm-subnet"
+}
+
 variable "instance_name" {
   description = "The name of the VM instance"
   type        = string

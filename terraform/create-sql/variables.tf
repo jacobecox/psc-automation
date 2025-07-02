@@ -26,6 +26,18 @@ variable "allowed_consumer_project_ids" {
   type        = list(string)
 }
 
+variable "producer_vpc_name" {
+  description = "The name of the producer VPC"
+  type        = string
+  default     = "producer-vpc"
+}
+
+variable "producer_subnet_name" {
+  description = "The name of the producer subnet"
+  type        = string
+  default     = "producer-subnet"
+}
+
 variable "tier" {
   description = "The machine type to use for the Cloud SQL instance"
   type        = string

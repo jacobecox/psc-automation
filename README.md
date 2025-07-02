@@ -21,6 +21,9 @@ cd psc-automation
 # Install dependencies
 npm install
 
+# Build the project
+npm run build
+
 # Set up environment variables
 cp .env.example .env
 # Edit .env with your service account credentials
@@ -31,42 +34,28 @@ npm start
 
 The server will start on `http://localhost:3000`
 
-## 📋 Available Modules
+## 📋 Available Routes
 
-### 1. Producer-Managed (`/api/producer-managed`)
+### 1. Producer (`/api/producer`)
 Complete producer infrastructure with SQL instance and PSC enabled.
 
 **Endpoints:**
-- `POST /api/producer-managed/deploy/managed` - Deploy full producer infrastructure
-- `GET /api/producer-managed/status/managed` - Get producer status
+- `POST /api/producer/deploy/managed` - Deploy full producer infrastructure with SQL instance
 
 ### 2. Consumer (`/api/consumer`)
-Consumer infrastructure with VPC, subnets, and PSC endpoint.
+Consumer infrastructure with VPC, subnets, PSC endpoint, and optional VM creation.
 
 **Endpoints:**
-- `POST /api/consumer/deploy/consumer` - Deploy consumer infrastructure
-
-### 3. Create SQL (`/api/create-sql`)
-Standalone SQL instance creation with PSC.
-
-**Endpoints:**
-- `POST /api/create-sql/deploy/create-sql` - Create SQL instance
-- `GET /api/create-sql/status/create-sql` - Get SQL status
-
-### 4. Create VM (`/api/create-vm`)
-VM instance creation in consumer VPC.
-
-**Endpoints:**
-- `POST /api/create-vm/deploy/create-vm` - Create VM instance
+- `POST /api/consumer/deploy/consumer` - Deploy consumer infrastructure and optionally create VM
 
 ## 🔧 Required Variables
 
-### Producer Side
+### Producer Route
 - `project_id` (required) - GCP project ID for producer
 - `region` (required) - GCP region (e.g., "us-central1")
 - `allowed_consumer_project_ids` (required) - Array of consumer project IDs
 
-### Consumer Side
+### Consumer Route
 - `project_id` (required) - GCP project ID for consumer
 - `region` (required) - GCP region (e.g., "us-central1")
 - `service_attachment_uri` (required) - Producer's service attachment URI
@@ -74,11 +63,11 @@ VM instance creation in consumer VPC.
 ## 🛠️ Service Account Permissions
 
 ### Consumer Projects
-The service account only needs the **Editor** role on consumer projects:
+The service account needs the **Editor** role on consumer projects:
 
 ```bash
 gcloud projects add-iam-policy-binding CONSUMER_PROJECT_ID \
-  --member="serviceAccount:central-service-account@admin-project-463522.iam.gserviceaccount.com" \
+  --member="serviceAccount:YOUR_SERVICE_ACCOUNT@YOUR_PROJECT.iam.gserviceaccount.com" \
   --role="roles/editor"
 ```
 
@@ -88,29 +77,29 @@ The service account needs these roles on producer projects:
 ```bash
 # Basic permissions
 gcloud projects add-iam-policy-binding PRODUCER_PROJECT_ID \
-  --member="serviceAccount:central-service-account@admin-project-463522.iam.gserviceaccount.com" \
+  --member="serviceAccount:YOUR_SERVICE_ACCOUNT@YOUR_PROJECT.iam.gserviceaccount.com" \
   --role="roles/editor"
 
 # Networking permissions for VPC peering and PSC
 gcloud projects add-iam-policy-binding PRODUCER_PROJECT_ID \
-  --member="serviceAccount:central-service-account@admin-project-463522.iam.gserviceaccount.com" \
+  --member="serviceAccount:YOUR_SERVICE_ACCOUNT@YOUR_PROJECT.iam.gserviceaccount.com" \
   --role="roles/servicenetworking.admin"
 
 gcloud projects add-iam-policy-binding PRODUCER_PROJECT_ID \
-  --member="serviceAccount:central-service-account@admin-project-463522.iam.gserviceaccount.com" \
+  --member="serviceAccount:YOUR_SERVICE_ACCOUNT@YOUR_PROJECT.iam.gserviceaccount.com" \
   --role="roles/compute.networkAdmin"
 ```
 
 ## 📖 Detailed Documentation
 
-- [Producer-Managed Documentation](README-managed-producer.md) - Complete producer setup with SQL
+- [Producer Documentation](README-producer.md) - Complete producer setup with SQL
 - [Consumer Documentation](README-consumer.md) - Consumer infrastructure setup
 
 ## 🔄 Typical Workflow
 
 1. **Deploy Producer Infrastructure:**
    ```bash
-   curl -X POST http://localhost:3000/api/producer-managed/deploy/managed \
+   curl -X POST http://localhost:3000/api/producer/deploy/managed \
      -H "Content-Type: application/json" \
      -d '{
        "project_id": "producer-project-123",
@@ -130,24 +119,10 @@ gcloud projects add-iam-policy-binding PRODUCER_PROJECT_ID \
      }'
    ```
 
-3. **Create VM in Consumer VPC:**
-   ```bash
-   curl -X POST http://localhost:3000/api/create-vm/deploy/create-vm \
-     -H "Content-Type: application/json" \
-     -d '{
-       "project_id": "consumer-project-456",
-       "region": "us-central1",
-       "instance_name": "app-vm",
-       "machine_type": "e2-micro"
-     }'
-   ```
-
 ## 🏗️ Terraform Modules
 
-- `terraform/producer-managed/` - Producer infrastructure with SQL
+- `terraform/producer/` - Producer infrastructure with SQL
 - `terraform/consumer/` - Consumer VPC and PSC endpoint
-- `terraform/create-sql/` - Standalone SQL instance
-- `terraform/create-vm/` - VM instance creation
 
 ## 🔍 Monitoring and Debugging
 
@@ -158,9 +133,9 @@ gcloud projects add-iam-policy-binding PRODUCER_PROJECT_ID \
 ## ⚠️ Important Notes
 
 - **No Defaults:** `project_id` and `region` are required for all operations
-- **State Isolation:** Uses Terraform workspaces for project isolation
-- **Timeouts:** SQL operations have extended timeouts (45 minutes)
-- **PSC Polling:** Automatically polls for PSC completion (30 seconds intervals)
+- **API Enablement:** Automatically enables required APIs for each project
+- **Timeouts:** Operations have extended timeouts for reliability
+- **Error Handling:** Comprehensive error handling with retry logic
 
 ## 🚨 Error Handling
 
@@ -179,7 +154,5 @@ For issues or questions:
 
 ## 🔄 Version History
 
-- **v1.0.0** - Initial release with producer-managed, consumer, create-sql, and create-vm modules
-- Standardized on `project_id` naming convention
-- Removed non-managed producer routes
-- Enhanced error handling and logging 
+- **v2.0.0** - Simplified structure with producer and consumer routes
+- **v1.0.0** - Initial release with multiple standalone modules 

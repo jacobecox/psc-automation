@@ -27,7 +27,7 @@ resource "google_compute_instance" "consumer_vm" {
   }
 
   network_interface {
-    subnetwork = "projects/${var.project_id}/regions/${var.region}/subnetworks/vm-subnet"
+    subnetwork = "projects/${var.project_id}/regions/${var.region}/subnetworks/${var.vm_subnet_name}"
     
     # No external IP - VM will use Cloud NAT for internet access
   }
@@ -83,12 +83,12 @@ output "internal_ip" {
 
 output "subnet_name" {
   description = "The subnet where the VM is located"
-  value       = "vm-subnet"
+  value       = var.vm_subnet_name
 }
 
 output "vpc_name" {
   description = "The VPC where the VM is located"
-  value       = "consumer-vpc"
+  value       = var.consumer_vpc_name
 }
 
 output "project_id" {

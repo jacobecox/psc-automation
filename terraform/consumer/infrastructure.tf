@@ -1,6 +1,6 @@
 # Create VPC (depends on Compute Engine API being fully enabled)
 resource "google_compute_network" "consumer_vpc" {
-  name                    = "consumer-vpc"
+  name                    = var.consumer_vpc_name
   auto_create_subnetworks = false
 
   timeouts {
@@ -12,8 +12,8 @@ resource "google_compute_network" "consumer_vpc" {
 
 # Create VM subnet
 resource "google_compute_subnetwork" "vm_subnet" {
-  name          = "vm-subnet"
-  ip_cidr_range = "10.1.0.0/24"
+  name          = var.vm_subnet_name
+  ip_cidr_range = var.vm_subnet_cidr_range
   region        = var.region
   network       = google_compute_network.consumer_vpc.id
 
@@ -26,8 +26,8 @@ resource "google_compute_subnetwork" "vm_subnet" {
 
 # Create PSC subnet
 resource "google_compute_subnetwork" "psc_subnet" {
-  name          = "psc-subnet"
-  ip_cidr_range = "10.2.0.0/24"
+  name          = var.psc_subnet_name
+  ip_cidr_range = var.psc_subnet_cidr_range
   region        = var.region
   network       = google_compute_network.consumer_vpc.id
 
@@ -53,7 +53,7 @@ resource "google_compute_firewall" "default_allow_internal" {
     protocol = "icmp"
   }
   
-  source_ranges = ["10.0.0.0/8"]
+  source_ranges = var.internal_firewall_source_ranges
 
   timeouts {
     create = "10m"
@@ -91,7 +91,7 @@ resource "google_compute_firewall" "allow_postgres_egress" {
     ports    = ["5432"]
   }
   
-  destination_ranges = ["10.0.0.0/8"]
+  destination_ranges = var.postgres_egress_destination_ranges
 
   timeouts {
     create = "10m"
@@ -156,7 +156,7 @@ resource "google_compute_address" "psc_ip" {
 
 # Create forwarding rule (private service connect endpoint)
 resource "google_compute_forwarding_rule" "psc_endpoint" {
-  name                  = "psc-endpoint"
+  name                  = var.psc_endpoint_name
   region                = var.region
   network               = google_compute_network.consumer_vpc.id
   subnetwork            = google_compute_subnetwork.psc_subnet.id
