@@ -8,17 +8,24 @@ Before using this automation, ensure that the service account has the necessary 
 
 ### Required Permissions
 
-The service account needs the **Editor** role on the consumer project:
+The service account needs these roles on the consumer project:
 - `roles/editor` - For general resource management (VPC, subnets, firewall rules, NAT, PSC endpoint)
+- `roles/serviceusage.serviceUsageAdmin` - For enabling required APIs (Cloud Resource Manager, Compute Engine)
 
 ### Granting Permissions
 
-You can grant the required permissions using this gcloud command:
+You can grant the required permissions using these gcloud commands:
 
 ```bash
+# Basic permissions for resource management
 gcloud projects add-iam-policy-binding your-project-id \
   --member="serviceAccount:YOUR_SERVICE_ACCOUNT@YOUR_PROJECT.iam.gserviceaccount.com" \
   --role="roles/editor"
+
+# API enablement permissions
+gcloud projects add-iam-policy-binding your-project-id \
+  --member="serviceAccount:YOUR_SERVICE_ACCOUNT@YOUR_PROJECT.iam.gserviceaccount.com" \
+  --role="roles/serviceusage.serviceUsageAdmin"
 ```
 
 ### Error Handling

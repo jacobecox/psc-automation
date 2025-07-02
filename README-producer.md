@@ -54,8 +54,8 @@ The producer route automatically:
    - Outputs VPC and subnet self_links for use by dependent modules
 
 3. **Sets Up Private Service Access**:
-   - Allocates IP range for Private Service Connect (PSC)
-   - Creates Private Service Connection for VPC peering
+   - Allocates IP range for Private Service Access (PSA)
+   - Creates Private Service Access for VPC peering
    - Enables private access to Google services
 
 4. **Creates Cloud SQL Instance**:
@@ -63,6 +63,7 @@ The producer route automatically:
    - Enables Private Service Connect for secure access
    - Uses the VPC and subnet self_links from the infrastructure module for proper dependency management
    - Configurable machine type, database version, backup settings, and maintenance window
+   - **⚠️ Security Note**: The default password is set to "postgres" for initial setup. It is **highly recommended** to change this to a secure password immediately after the instance is created.
 
 ## API Endpoints
 
@@ -122,7 +123,7 @@ The Terraform configuration is located in `terraform/producer/` and includes:
 
 - `project_id` (required) - GCP project ID for producer
 - `region` (required) - GCP region (e.g., "us-central1")
-- `allowed_consumer_project_ids` (required) - Array of consumer project IDs
+- `allowed_consumer_project_ids` (required) - Array of one or more consumer project IDs
 
 ### Optional Variables
 
@@ -190,6 +191,53 @@ The producer route includes comprehensive error handling:
 - **Terraform execution errors** with detailed logging
 - **API enablement errors** with retry logic
 - **SQL creation errors** that don't fail the entire deployment
+
+## Security Considerations
+
+### Database Password Security
+
+**⚠️ Critical Security Requirement**: The Cloud SQL instance is created with a default password of "postgres". This is intentionally simple for initial setup but **must be changed immediately** after deployment for security.
+
+#### Recommended Actions After Deployment:
+
+1. **Change the default password** using the Google Cloud Console or gcloud CLI:
+   ```bash
+   gcloud sql users set-password postgres \
+     --instance=producer-sql \
+     --project=your-project-id \
+     --password=your-secure-password
+   ```
+
+2. **Use a strong password** that includes:
+   - At least 12 characters
+   - Mix of uppercase and lowercase letters
+   - Numbers and special characters
+   - Avoid common words or patterns
+
+3. **Store the password securely** in a password manager or secure vault
+
+4. **Update application configurations** to use the new password
+
+#### Alternative: Use Custom Password During Deployment
+
+You can specify a custom password during deployment by including the `default_password` parameter:
+
+```bash
+curl -X POST http://localhost:3000/api/producer/deploy/managed \
+  -H "Content-Type: application/json" \
+  -d '{
+    "project_id": "producer-project-123",
+    "region": "us-central1",
+    "allowed_consumer_project_ids": ["consumer-project-456"],
+    "default_password": "your-secure-password-here"
+  }'
+```
+
+### Network Security
+
+- **Private Service Connect**: All database connections are routed through PSC, ensuring no public internet access
+- **VPC Isolation**: Database is isolated within a private VPC
+- **Firewall Rules**: Restrictive firewall policies limit access to authorized networks only
 
 ## Architecture
 

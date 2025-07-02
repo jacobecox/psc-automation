@@ -2,7 +2,7 @@
 
 This project provides automated infrastructure deployment for Google Cloud Platform's Private Service Connect (PSC) using Terraform and Node.js/Express. It enables teams to quickly set up producer and consumer infrastructure for secure service-to-service communication.
 
-## 🚀 Quick Start
+## 🟢 Quick Start
 
 ### Prerequisites
 
@@ -63,12 +63,18 @@ Consumer infrastructure with VPC, subnets, PSC endpoint, and optional VM creatio
 ## 🛠️ Service Account Permissions
 
 ### Consumer Projects
-The service account needs the **Editor** role on consumer projects:
+The service account needs these roles on consumer projects:
 
 ```bash
+# Basic permissions for resource management
 gcloud projects add-iam-policy-binding CONSUMER_PROJECT_ID \
   --member="serviceAccount:YOUR_SERVICE_ACCOUNT@YOUR_PROJECT.iam.gserviceaccount.com" \
   --role="roles/editor"
+
+# API enablement permissions
+gcloud projects add-iam-policy-binding CONSUMER_PROJECT_ID \
+  --member="serviceAccount:YOUR_SERVICE_ACCOUNT@YOUR_PROJECT.iam.gserviceaccount.com" \
+  --role="roles/serviceusage.serviceUsageAdmin"
 ```
 
 ### Producer Projects
