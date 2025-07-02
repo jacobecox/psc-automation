@@ -13,19 +13,6 @@ provider "google" {
   region  = var.region
 }
 
-# Use existing producer VPC
-data "google_compute_network" "producer_vpc" {
-  name    = var.producer_vpc_name
-  project = var.project_id
-}
-
-# Use existing producer subnet
-data "google_compute_subnetwork" "producer_subnet" {
-  name    = var.producer_subnet_name
-  project = var.project_id
-  region  = var.region
-}
-
 # Create Cloud SQL instance with PSC enabled
 resource "google_sql_database_instance" "producer_sql" {
   name             = var.instance_id
@@ -40,7 +27,7 @@ resource "google_sql_database_instance" "producer_sql" {
     
     ip_configuration {
       ipv4_enabled    = false
-      private_network = data.google_compute_network.producer_vpc.id
+      private_network = var.producer_vpc_self_link
       require_ssl     = false
       
       psc_config {

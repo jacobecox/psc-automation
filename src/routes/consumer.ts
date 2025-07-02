@@ -86,14 +86,14 @@ router.post('/deploy/consumer', async (req: Request, res: Response): Promise<voi
       pscEndpointName: psc_endpoint_name
     });
 
-    // Create VM instance
+    // Create VM instance using the VPC and subnet self_links from infrastructure
     let vm;
     try {
       vm = await createVm({
         projectId: project_id,
         region: region,
-        consumerVpcName: consumer_vpc_name,
-        vmSubnetName: vm_subnet_name,
+        consumerVpcSelfLink: infrastructure.vpc_self_link,
+        vmSubnetSelfLink: infrastructure.vm_subnet_self_link,
         instanceName: instance_name,
         machineType: machine_type,
         osImage: os_image

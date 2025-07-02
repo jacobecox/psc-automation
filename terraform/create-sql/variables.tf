@@ -26,16 +26,14 @@ variable "allowed_consumer_project_ids" {
   type        = list(string)
 }
 
-variable "producer_vpc_name" {
-  description = "The name of the producer VPC"
+variable "producer_vpc_self_link" {
+  description = "The self-link of the producer VPC"
   type        = string
-  default     = "producer-vpc"
 }
 
-variable "producer_subnet_name" {
-  description = "The name of the producer subnet"
+variable "producer_subnet_self_link" {
+  description = "The self-link of the producer subnet"
   type        = string
-  default     = "producer-subnet"
 }
 
 variable "tier" {

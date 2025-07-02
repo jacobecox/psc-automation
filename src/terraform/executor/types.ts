@@ -14,6 +14,8 @@ export interface TerraformOutput {
   zone?: string;
   vpc_name?: string;
   subnet_name?: string;
+  vm_subnet_name?: string;
+  psc_subnet_name?: string;
   instance_name?: string;
   port?: number;
   instance_group_name?: string;
@@ -33,6 +35,8 @@ export interface TerraformOutput {
   psc_ip_range_name?: string;
   vpc_self_link?: string;
   subnet_self_link?: string;
+  vm_subnet_self_link?: string;
+  psc_subnet_self_link?: string;
 }
 
 export interface TerraformVariables {

@@ -4,8 +4,8 @@ import path from 'path';
 export async function createVm(params: {
   projectId: string;
   region: string;
-  consumerVpcName?: string;
-  vmSubnetName?: string;
+  consumerVpcSelfLink: string;
+  vmSubnetSelfLink: string;
   instanceName?: string;
   machineType?: string;
   osImage?: string;
@@ -13,8 +13,8 @@ export async function createVm(params: {
   const {
     projectId,
     region,
-    consumerVpcName,
-    vmSubnetName,
+    consumerVpcSelfLink,
+    vmSubnetSelfLink,
     instanceName = 'consumer-vm',
     machineType = 'e2-micro',
     osImage = 'debian-cloud/debian-12'
@@ -25,11 +25,11 @@ export async function createVm(params: {
     tfVars: {
       project_id: projectId,
       region: region,
+      consumer_vpc_self_link: consumerVpcSelfLink,
+      vm_subnet_self_link: vmSubnetSelfLink,
       instance_name: instanceName,
       machine_type: machineType,
-      os_image: osImage,
-      ...(consumerVpcName && { consumer_vpc_name: consumerVpcName }),
-      ...(vmSubnetName && { vm_subnet_name: vmSubnetName })
+      os_image: osImage
     },
     enableApis: false, // APIs already enabled by previous modules
     retryPolicy: {

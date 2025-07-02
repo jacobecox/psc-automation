@@ -14,8 +14,6 @@ interface ProducerManagedRequest {
   subnet_cidr_range?: string;
   internal_firewall_source_ranges?: string[];
   psc_ip_range_prefix_length?: number;
-  producer_vpc_name?: string;
-  producer_subnet_name?: string;
 }
 
 interface ProducerManagedResponse {
@@ -40,9 +38,7 @@ router.post('/deploy/managed', async (req: Request, res: Response): Promise<void
       default_password,
       subnet_cidr_range,
       internal_firewall_source_ranges,
-      psc_ip_range_prefix_length,
-      producer_vpc_name,
-      producer_subnet_name
+      psc_ip_range_prefix_length
     } = req.body as ProducerManagedRequest;
 
     // Validate required fields
@@ -73,7 +69,7 @@ router.post('/deploy/managed', async (req: Request, res: Response): Promise<void
       pscIpRangePrefixLength: psc_ip_range_prefix_length
     });
 
-    // Create SQL instance
+    // Create SQL instance using the VPC and subnet self_links from infrastructure
     let sql;
     try {
       sql = await createSql({
@@ -82,8 +78,8 @@ router.post('/deploy/managed', async (req: Request, res: Response): Promise<void
         instanceId: instance_id,
         defaultPassword: default_password,
         allowedConsumerProjectIds: allowed_consumer_project_ids,
-        producerVpcName: producer_vpc_name,
-        producerSubnetName: producer_subnet_name
+        producerVpcSelfLink: infrastructure.vpc_self_link,
+        producerSubnetSelfLink: infrastructure.subnet_self_link
       });
     } catch (sqlError) {
       console.error('SQL creation failed:', sqlError);

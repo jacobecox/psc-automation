@@ -39,6 +39,7 @@ The consumer route automatically:
    - PSC subnet with configurable name (default: "psc-subnet") and CIDR (default: `10.2.0.0/24`)
    - Default firewall rules for internal communication and SSH access
    - Egress firewall rule for PostgreSQL connections (port 5432)
+   - Outputs VPC and subnet self_links for use by dependent modules
 
 3. **Sets Up Cloud NAT**:
    - Cloud Router for NAT functionality
@@ -51,6 +52,7 @@ The consumer route automatically:
 
 5. **Optionally Creates VM**:
    - Creates a VM instance in the consumer VPC if VM parameters are provided
+   - Uses the VPC and subnet self_links from the infrastructure module for proper dependency management
    - Uses configurable machine type and OS image
 
 ## API Endpoints
@@ -202,5 +204,14 @@ The consumer infrastructure creates a secure network environment for connecting 
 2. **NAT gateway**: Provides internet access for VMs while keeping them private
 3. **PSC endpoint**: Secure connection to producer services
 4. **Firewall rules**: Restrictive access policies for security
+
+### Module Dependencies
+
+The deployment uses a modular approach with proper dependency management:
+
+- **Consumer Infrastructure Module**: Creates VPC, subnets, NAT, and PSC endpoint, outputting their self_links
+- **Create VM Module**: Uses the VPC and subnet self_links from the infrastructure module, ensuring it references the exact resources created by the consumer module
+
+This approach ensures that the VM is always created in the correct VPC and subnet, and creates a proper dependency chain between modules.
 
 This architecture ensures secure, private communication between consumer applications and producer services while maintaining proper network isolation. 
