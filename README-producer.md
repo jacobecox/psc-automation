@@ -49,9 +49,8 @@ The producer route automatically:
 
 2. **Creates Network Infrastructure**:
    - VPC with configurable name (default: "producer-vpc")
-   - Subnet with configurable name (default: "producer-subnet") and CIDR (default: `10.0.0.0/24`)
    - Default firewall rules for internal communication and SSH access
-   - Outputs VPC and subnet self_links for use by dependent modules
+   - Outputs VPC self_link for use by dependent modules
 
 3. **Sets Up Private Service Access**:
    - Allocates IP range for Private Service Access (PSA)
@@ -61,7 +60,7 @@ The producer route automatically:
 4. **Creates Cloud SQL Instance**:
    - Creates a PostgreSQL instance with configurable settings
    - Enables Private Service Connect for secure access
-   - Uses the VPC and subnet self_links from the infrastructure module for proper dependency management
+   - Uses the VPC self_link from the infrastructure module for proper dependency management
    - Configurable machine type, database version, backup settings, and maintenance window
    - **⚠️ Security Note**: The default password is set to "postgres" for initial setup. It is **highly recommended** to change this to a secure password immediately after the instance is created.
 
@@ -77,7 +76,6 @@ The producer route automatically:
   "project_id": "producer-project-123",  // required
   "region": "us-central1",  // required
   "allowed_consumer_project_ids": ["consumer-project-456"],  // required
-  "subnet_cidr_range": "10.0.0.0/24",  // optional, defaults to "10.0.0.0/24"
   "internal_firewall_source_ranges": ["10.0.0.0/8"],  // optional, defaults to ["10.0.0.0/8"]
   "psc_ip_range_prefix_length": 16,  // optional, defaults to 16
   "instance_id": "producer-sql",  // optional, defaults to "producer-sql"
@@ -93,11 +91,9 @@ The producer route automatically:
   "region": "us-central1",
   "infrastructure": {
     "vpc_name": "producer-vpc",
-    "subnet_name": "producer-subnet",
     "psc_ip_range": "10.1.0.0/16",
     "psc_ip_range_name": "psc-ip-range",
-    "vpc_self_link": "https://www.googleapis.com/compute/v1/projects/...",
-    "subnet_self_link": "https://www.googleapis.com/compute/v1/projects/..."
+    "vpc_self_link": "https://www.googleapis.com/compute/v1/projects/..."
   },
   "sql": {
     "instance_name": "producer-sql",
@@ -127,7 +123,6 @@ The Terraform configuration is located in `terraform/producer/` and includes:
 
 ### Optional Variables
 
-- `subnet_cidr_range` (default: "10.0.0.0/24") - CIDR range for the subnet
 - `internal_firewall_source_ranges` (default: ["10.0.0.0/8"]) - Source ranges for internal firewall
 - `psc_ip_range_prefix_length` (default: 16) - Prefix length for PSC IP range
 
@@ -141,7 +136,6 @@ The Terraform configuration is located in `terraform/producer/` and includes:
 
 2. **Network Resources**:
    - `google_compute_network.producer_vpc`
-   - `google_compute_subnetwork.producer_subnet`
    - `google_compute_firewall.default_allow_internal`
    - `google_compute_firewall.default_allow_ssh`
 
@@ -177,7 +171,6 @@ curl -X POST http://localhost:3000/api/producer/deploy/managed \
     "project_id": "producer-project-123",
     "region": "us-central1",
     "allowed_consumer_project_ids": ["consumer-project-456"],
-    "subnet_cidr_range": "10.1.0.0/24",
     "instance_id": "my-custom-sql",
     "default_password": "mypassword123"
   }'
@@ -252,9 +245,9 @@ The producer infrastructure creates a secure environment for hosting services:
 
 The deployment uses a modular approach with proper dependency management:
 
-- **Producer Infrastructure Module**: Creates VPC, subnet, and networking resources, outputting their self_links
-- **Create SQL Module**: Uses the VPC and subnet self_links from the infrastructure module, ensuring it references the exact resources created by the producer module
+- **Producer Infrastructure Module**: Creates VPC and networking resources, outputting the VPC self_link
+- **Create SQL Module**: Uses the VPC self_link from the infrastructure module, ensuring it references the exact VPC created by the producer module
 
-This approach ensures that the SQL instance is always created in the correct VPC and subnet, and creates a proper dependency chain between modules.
+This approach ensures that the SQL instance is always created in the correct VPC, and creates a proper dependency chain between modules.
 
 This architecture ensures secure, private communication between producer services and consumer applications while maintaining proper network isolation.

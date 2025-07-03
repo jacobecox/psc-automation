@@ -5,7 +5,6 @@ export async function deployProducerManaged(params: {
   projectId: string;
   region: string;
   allowedConsumerProjectIds: string[];
-  subnetCidrRange?: string;
   internalFirewallSourceRanges?: string[];
   pscIpRangePrefixLength?: number;
 }): Promise<any> {
@@ -13,7 +12,6 @@ export async function deployProducerManaged(params: {
     projectId,
     region,
     allowedConsumerProjectIds,
-    subnetCidrRange,
     internalFirewallSourceRanges,
     pscIpRangePrefixLength
   } = params;
@@ -24,7 +22,6 @@ export async function deployProducerManaged(params: {
       project_id: projectId,
       region: region,
       allowed_consumer_project_ids: allowedConsumerProjectIds,
-      ...(subnetCidrRange && { subnet_cidr_range: subnetCidrRange }),
       ...(internalFirewallSourceRanges && { internal_firewall_source_ranges: internalFirewallSourceRanges }),
       ...(pscIpRangePrefixLength && { psc_ip_range_prefix_length: pscIpRangePrefixLength })
     },

@@ -39,7 +39,6 @@ export async function getTerraformOutput(terraformDir: string): Promise<Terrafor
       psc_ip_range: outputs.psc_ip_range?.value,
       psc_ip_range_name: outputs.psc_ip_range_name?.value,
       vpc_self_link: outputs.vpc_self_link?.value,
-      subnet_self_link: outputs.subnet_self_link?.value,
       vm_subnet_self_link: outputs.vm_subnet_self_link?.value,
       psc_subnet_self_link: outputs.psc_subnet_self_link?.value,
     };

@@ -11,7 +11,6 @@ interface ProducerManagedRequest {
   allowed_consumer_project_ids: string[];
   instance_id?: string;
   default_password?: string;
-  subnet_cidr_range?: string;
   internal_firewall_source_ranges?: string[];
   psc_ip_range_prefix_length?: number;
 }
@@ -36,7 +35,6 @@ router.post('/deploy/managed', async (req: Request, res: Response): Promise<void
       allowed_consumer_project_ids,
       instance_id,
       default_password,
-      subnet_cidr_range,
       internal_firewall_source_ranges,
       psc_ip_range_prefix_length
     } = req.body as ProducerManagedRequest;
@@ -64,12 +62,11 @@ router.post('/deploy/managed', async (req: Request, res: Response): Promise<void
       projectId: project_id,
       region: region,
       allowedConsumerProjectIds: allowed_consumer_project_ids,
-      subnetCidrRange: subnet_cidr_range,
       internalFirewallSourceRanges: internal_firewall_source_ranges,
       pscIpRangePrefixLength: psc_ip_range_prefix_length
     });
 
-    // Create SQL instance using the VPC and subnet self_links from infrastructure
+    // Create SQL instance using the VPC self_link from infrastructure
     let sql;
     try {
       sql = await createSql({
@@ -78,8 +75,7 @@ router.post('/deploy/managed', async (req: Request, res: Response): Promise<void
         instanceId: instance_id,
         defaultPassword: default_password,
         allowedConsumerProjectIds: allowed_consumer_project_ids,
-        producerVpcSelfLink: infrastructure.vpc_self_link,
-        producerSubnetSelfLink: infrastructure.subnet_self_link
+        producerVpcSelfLink: infrastructure.vpc_self_link
       });
     } catch (sqlError) {
       console.error('SQL creation failed:', sqlError);

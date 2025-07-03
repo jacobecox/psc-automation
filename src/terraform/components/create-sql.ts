@@ -8,7 +8,6 @@ export async function createSql(params: {
   defaultPassword?: string;
   allowedConsumerProjectIds: string[];
   producerVpcSelfLink: string;
-  producerSubnetSelfLink: string;
 }): Promise<any> {
   const {
     projectId,
@@ -16,8 +15,7 @@ export async function createSql(params: {
     instanceId,
     defaultPassword,
     allowedConsumerProjectIds,
-    producerVpcSelfLink,
-    producerSubnetSelfLink
+    producerVpcSelfLink
   } = params;
 
   const config: TerraformConfig = {
@@ -27,7 +25,6 @@ export async function createSql(params: {
       region: region,
       allowed_consumer_project_ids: allowedConsumerProjectIds,
       producer_vpc_self_link: producerVpcSelfLink,
-      producer_subnet_self_link: producerSubnetSelfLink,
       ...(instanceId && { instance_id: instanceId }),
       ...(defaultPassword && { default_password: defaultPassword })
     },

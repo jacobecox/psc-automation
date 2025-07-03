@@ -34,7 +34,6 @@ export interface TerraformOutput {
   psc_ip_range?: string;
   psc_ip_range_name?: string;
   vpc_self_link?: string;
-  subnet_self_link?: string;
   vm_subnet_self_link?: string;
   psc_subnet_self_link?: string;
 }

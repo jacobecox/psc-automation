@@ -31,11 +31,6 @@ variable "producer_vpc_self_link" {
   type        = string
 }
 
-variable "producer_subnet_self_link" {
-  description = "The self-link of the producer subnet"
-  type        = string
-}
-
 variable "tier" {
   description = "The machine type to use for the Cloud SQL instance"
   type        = string

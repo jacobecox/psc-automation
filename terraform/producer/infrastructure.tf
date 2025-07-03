@@ -10,20 +10,6 @@ resource "google_compute_network" "producer_vpc" {
   }
 }
 
-# Create subnet
-resource "google_compute_subnetwork" "producer_subnet" {
-  name          = "producer-subnet"
-  ip_cidr_range = var.subnet_cidr_range
-  region        = var.region
-  network       = google_compute_network.producer_vpc.id
-
-  timeouts {
-    create = "10m"
-    update = "10m"
-    delete = "10m"
-  }
-}
-
 # Create default firewall rules
 resource "google_compute_firewall" "default_allow_internal" {
   name    = "producer-allow-internal"
@@ -102,11 +88,6 @@ output "vpc_name" {
   value       = google_compute_network.producer_vpc.name
 }
 
-output "subnet_name" {
-  description = "The name of the created subnet"
-  value       = google_compute_subnetwork.producer_subnet.name
-}
-
 output "psc_ip_range" {
   description = "The allocated IP range for Private Service Access"
   value       = google_compute_global_address.psc_ip_range.address
@@ -120,9 +101,4 @@ output "psc_ip_range_name" {
 output "vpc_self_link" {
   description = "The self-link of the created VPC"
   value       = google_compute_network.producer_vpc.self_link
-}
-
-output "subnet_self_link" {
-  description = "The self-link of the created subnet"
-  value       = google_compute_subnetwork.producer_subnet.self_link
 } 

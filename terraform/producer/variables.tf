@@ -14,12 +14,6 @@ variable "psc_ip_range_name" {
   default     = "psc-ip-range"
 }
 
-variable "subnet_cidr_range" {
-  description = "CIDR range for the producer subnet"
-  type        = string
-  default     = "10.0.0.0/24"
-}
-
 variable "internal_firewall_source_ranges" {
   description = "Source IP ranges for internal firewall rules"
   type        = list(string)
